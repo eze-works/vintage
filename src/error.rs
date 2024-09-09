@@ -3,8 +3,8 @@ use std::io;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Occurs when a [`Connection`] could not be created from an underlying transport
-    #[error("Could not duplicate socket")] 
-    SocketError(#[source] io::Error),
+    #[error("Could not duplicate socket")]
+    Socket(#[source] io::Error),
 
     /// Occurs if reading from a [`Connection`] fails in the middle of a request
     #[error("The connection socket was closed unexpectedly")]
@@ -13,7 +13,10 @@ pub enum Error {
     /// Occurs if FastCgi record uses any version other than "1"
     #[error("Unsupported FastCGI version: '{0}'")]
     UnsuportedVersion(u8),
-    
+
+    #[error("Multiplexing multiple requests unto a single connection is not supported")]
+    MultiplexingUnsupported,
+
     /// Occurs when a record type is recognized but its payload was malformed
     #[error("Received malfored FastCGI record for type '{0}'")]
     MalformedRecordPayload(&'static str),
@@ -28,7 +31,5 @@ pub enum Error {
     InvalidUtf8KeyValuePair,
 
     #[error("Web server sent a malformed record stream")]
-    MalformedRecordStream
-
+    MalformedRecordStream,
 }
-

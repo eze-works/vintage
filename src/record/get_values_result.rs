@@ -1,21 +1,30 @@
-use crate::error::Error;
-use std::io::{self, Write};
 use super::pairs;
+use crate::error::Error;
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 
-#[derive(Debug, Clone)]
+/// A FastCGI `FCGI_GET_VALUES_RESULT` record
+///
+/// This is sent by a FastCGI server in response to a request with a
+/// [`GetValues`](crate::record::GetValues) record.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetValuesResult {
-    values: BTreeMap<String, String>
+    values: BTreeMap<String, String>,
 }
 
 impl GetValuesResult {
-    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         Ok(Self {
-            values: pairs::from_record_bytes(bytes)?
+            values: pairs::from_record_bytes(bytes)?,
         })
     }
 
-    pub fn to_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         pairs::to_record_bytes(&self.values, writer)
+    }
+
+    /// Creates a new `FCGI_GET_VALUES_RESULT` record
+    pub fn new(values: BTreeMap<String, String>) -> Self {
+        Self { values }
     }
 }

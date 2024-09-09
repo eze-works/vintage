@@ -1,4 +1,6 @@
+mod abort_request;
 mod begin_request;
+mod data;
 mod end_request;
 mod get_values;
 mod get_values_result;
@@ -6,30 +8,29 @@ mod pairs;
 mod params;
 mod protocol_status;
 mod role;
+mod stderr;
 mod stdin;
 mod stdout;
 mod unknown;
-mod data;
-mod stderr;
-mod abort_request;
 
 use crate::error::Error;
-use begin_request::BeginRequest;
-use end_request::EndRequest;
-use get_values::GetValues;
-use get_values_result::GetValuesResult;
-use params::Params;
-use std::collections::BTreeMap;
-use std::io::{self, Cursor, Read, Write};
-use stdin::Stdin;
-use stdout::Stdout;
-use unknown::UnknownType;
-use data::Data;
-use stderr::Stderr;
-use abort_request::AbortRequest;
+pub use abort_request::AbortRequest;
+pub use begin_request::BeginRequest;
+pub use data::Data;
+pub use end_request::EndRequest;
+pub use get_values::GetValues;
+pub use get_values_result::GetValuesResult;
+pub use params::Params;
+pub use protocol_status::ProtocolStatus;
+pub use role::Role;
+use std::io::{self, Write};
+pub use stderr::Stderr;
+pub use stdin::Stdin;
+pub use stdout::Stdout;
+pub use unknown::UnknownType;
 
 const FCGI_BEGIN_REQUEST: u8 = 1;
-const FCGI_ABORT_REQUEST: u8 = 2;  
+const FCGI_ABORT_REQUEST: u8 = 2;
 const FCGI_END_REQUEST: u8 = 3;
 const FCGI_PARAMS: u8 = 4;
 const FCGI_STDIN: u8 = 5;
@@ -40,9 +41,16 @@ const FCGI_GET_VALUES: u8 = 9;
 const FCGI_GET_VALUES_RESULT: u8 = 10;
 const FCGI_UNKNOWN_TYPE: u8 = 11;
 
-pub const DISCRETE_RECORD_TYPES: [u8; 3] =
+pub(super) const DISCRETE_RECORD_TYPES: [u8; 3] =
     [FCGI_BEGIN_REQUEST, FCGI_ABORT_REQUEST, FCGI_GET_VALUES];
 
+pub(super) const MANAGEMENT_RECORD_TYPES: [u8; 3] =
+    [FCGI_GET_VALUES, FCGI_GET_VALUES_RESULT, FCGI_UNKNOWN_TYPE];
+
+/// A single FastCGI message
+///
+/// All data that flows between FastCGI client and server is carried in records. The variant used
+/// communicates the intent of the message
 #[derive(Debug, Clone)]
 pub enum Record {
     GetValues(GetValues),
@@ -89,51 +97,25 @@ impl Record {
             FCGI_STDERR => Record::Stderr(Stderr::from_record_bytes(payload)?),
             FCGI_ABORT_REQUEST => Record::AbortRequest(AbortRequest::from_record_bytes(payload)?),
             FCGI_END_REQUEST => Record::EndRequest(EndRequest::from_record_bytes(payload)?),
-            t => Record::UnknownType(UnknownType::from_record_bytes(payload)?),
+            _ => Record::UnknownType(UnknownType::from_record_bytes(payload)?),
         };
 
         Ok(record)
     }
 
-    // TODO: For management requests, set the request id to 0
     pub fn to_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
-        // We need the payload length in order to figure out the length of the padding
-        let mut payload = vec![];
-
         match self {
-            Self::GetValues(r) => r.to_record_bytes(&mut payload),
-            Self::GetValuesResult(r) => r.to_record_bytes(&mut payload),
-            Self::BeginRequest(r) => r.to_record_bytes(&mut payload),
-            Self::Params(r) => r.to_record_bytes(&mut payload),
-            Self::Stdin(r) => r.to_record_bytes(&mut payload),
-            Self::Data(r) => r.to_record_bytes(&mut payload),
-            Self::Stdout(r) => r.to_record_bytes(&mut payload),
-            Self::Stderr(r) => r.to_record_bytes(&mut payload),
-            Self::AbortRequest(r) => r.to_record_bytes(&mut payload),
-            Self::EndRequest(r) => r.to_record_bytes(&mut payload),
-            Self::UnknownType(r) => r.to_record_bytes(&mut payload),
-        };
-
-        // Length of Header + Length of Payload
-        let unpadded_len = 8 + payload.len();
-
-        // Figure out the closest factor of 8 that is greater than the unpadded length
-        let padded_len = unpadded_len.div_ceil(8) * 8;
-
-        // The amount of padding is the difference between those numers
-        let padding = (padded_len - unpadded_len) as u8;
-
-        // Version + Record type + Request ID (which is always 1)
-        writer.write_all(&[1, self.type_id(), 0, 1])?;
-        // Payload length
-        writer.write_all(&(payload.len() as u16).to_be_bytes())?;
-        // Padding length + Reserved field
-        writer.write_all(&[padding, 0])?;
-        // Payload
-        writer.write_all(&payload)?;
-        // Padding
-        writer.write_all(&vec![0u8; padding as usize])?;
-        // Don't forget to flush.
-        writer.flush()
+            Self::GetValues(r) => r.write_record_bytes(writer),
+            Self::GetValuesResult(r) => r.write_record_bytes(writer),
+            Self::BeginRequest(r) => r.write_record_bytes(writer),
+            Self::Params(r) => r.write_record_bytes(writer),
+            Self::Stdin(r) => r.write_record_bytes(writer),
+            Self::Data(r) => r.write_record_bytes(writer),
+            Self::Stdout(r) => r.write_record_bytes(writer),
+            Self::Stderr(r) => r.write_record_bytes(writer),
+            Self::AbortRequest(r) => r.write_record_bytes(writer),
+            Self::EndRequest(r) => r.write_record_bytes(writer),
+            Self::UnknownType(r) => r.write_record_bytes(writer),
+        }
     }
 }

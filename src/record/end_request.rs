@@ -2,6 +2,10 @@ use super::protocol_status::ProtocolStatus;
 use crate::error::Error;
 use std::io::{self, Write};
 
+/// A FastCGI `FCGI_END_REQUEST` record
+///
+/// This record is used by a FastCGI server to indicate a request is complete, either because it
+/// has been processed successfully or because it has been rejected.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EndRequest {
     exit_code: u32,
@@ -9,7 +13,7 @@ pub struct EndRequest {
 }
 
 impl EndRequest {
-    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         let buffer: [u8; 8] = bytes
             .try_into()
             .map_err(|_| Error::MalformedRecordPayload("EndRequest"))?;
@@ -18,13 +22,20 @@ impl EndRequest {
         let protocol_status = ProtocolStatus::from_record_byte(buffer[4])?;
         Ok(Self {
             exit_code,
-            protocol_status
+            protocol_status,
         })
     }
 
-
-    pub fn to_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&self.exit_code.to_be_bytes())?;
-        writer.write_all(&[self.protocol_status.id()])
+        self.protocol_status.as_record_byte(writer)
+    }
+
+    /// Creates a new `FCGI_END_REQUEST` record
+    pub fn new(exit_code: u32, status: ProtocolStatus) -> Self {
+        Self {
+            exit_code,
+            protocol_status: status,
+        }
     }
 }

@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
-use std::io::{self, Write, Read, Cursor};
 use crate::error::Error;
+use std::collections::BTreeMap;
+use std::io::{self, Cursor, Read, Write};
 
 type Pairs = BTreeMap<String, String>;
 
@@ -11,16 +11,16 @@ fn read_pair_len<R: Read>(reader: &mut R) -> Result<u32, Error> {
 
     reader
         .read_exact(&mut sentinel)
-        .map_err(|e| Error::MalformedRecordPayload("Params"))?;
+        .map_err(|_| Error::MalformedRecordPayload("Params"))?;
 
     if sentinel[0] <= 127 {
         return Ok(sentinel[0] as u32);
     }
 
-    let mut len_bytes  = [sentinel[0], 0, 0, 0];
+    let mut len_bytes = [sentinel[0], 0, 0, 0];
     reader
         .read_exact(&mut len_bytes[1..])
-        .map_err(|e| Error::MalformedRecordPayload("Params"))?;
+        .map_err(|_| Error::MalformedRecordPayload("Params"))?;
 
     let len = u32::from_be_bytes(len_bytes);
     Ok(len)
@@ -30,7 +30,7 @@ fn read_pair_len<R: Read>(reader: &mut R) -> Result<u32, Error> {
 // value, followed by the name, followed by the value. Lengths of 127 bytes and less can be
 // encoded in one byte, while longer lengths are always encoded in four bytes:
 pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Pairs, Error> {
-    let len = bytes.len(); 
+    let len = bytes.len();
     let mut cursor = Cursor::new(bytes);
     let mut pairs = BTreeMap::new();
 
@@ -49,10 +49,10 @@ pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Pairs, Error> {
 
         cursor
             .read_exact(&mut name)
-            .map_err(|e| Error::MalformedRecordPayload("Params"))?;
+            .map_err(|_| Error::MalformedRecordPayload("Params"))?;
         cursor
             .read_exact(&mut value)
-            .map_err(|e| Error::MalformedRecordPayload("Params"))?;
+            .map_err(|_| Error::MalformedRecordPayload("Params"))?;
 
         let name = String::from_utf8(name).map_err(|_| Error::InvalidUtf8KeyValuePair)?;
         let value = String::from_utf8(value).map_err(|_| Error::InvalidUtf8KeyValuePair)?;
@@ -81,4 +81,3 @@ pub fn to_record_bytes<W: Write>(pairs: &Pairs, writer: &mut W) -> Result<(), io
 
     Ok(())
 }
-

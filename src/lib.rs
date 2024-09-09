@@ -18,4 +18,4 @@
 
 mod connection;
 mod error;
-mod record;
+pub mod record;

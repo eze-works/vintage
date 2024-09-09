@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::record::{self, Record};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::TcpStream;
 #[cfg(target_family = "unix")]
 use std::os::unix::net::UnixStream;
@@ -43,7 +43,7 @@ impl TryFrom<TcpStream> for Connection {
         let reader = value;
         let writer = reader
             .try_clone()
-            .map_err(|e| Error::SocketError(e))?;
+            .map_err(Error::Socket)?;
         Ok(Self::Tcp(BufReader::new(reader), BufWriter::new(writer)))
     }
 }
@@ -55,7 +55,7 @@ impl TryFrom<UnixStream> for Connection {
         let reader = value;
         let writer = reader
             .try_clone()
-            .map_err(|e| Error::SocketError(e))?;
+            .map_err(Error::Socket)?;
         Ok(Self::UnixSocket(
             BufReader::new(reader),
             BufWriter::new(writer),
@@ -92,7 +92,7 @@ impl Connection {
     fn read_packet(&mut self) -> Result<Packet, Error> {
         let mut header = [0u8; 8];
         self.read_exact(&mut header)
-            .map_err(|e| Error::UnexpectedSocketClose(e))?;
+            .map_err(Error::UnexpectedSocketClose)?;
 
         let [version, type_id, req_id_1, req_id_0, length_1, length_0, padding_length, _] = header;
 
@@ -100,15 +100,20 @@ impl Connection {
             return Err(Error::UnsuportedVersion(version));
         }
 
-        let req_id = ((req_id_1 as u16) << 8) | req_id_0 as u16;
-        let length = ((length_1 as u16) << 8) | length_0 as u16;
+        let req_id = u16::from_be_bytes([req_id_1, req_id_0]);
+
+        if req_id > 1 {
+            return Err(Error::MultiplexingUnsupported);
+        }
+
+        let length = u16::from_be_bytes([length_1, length_0]);
         let mut content = vec![0u8; length as usize];
         let mut padding = vec![0u8; padding_length as usize];
 
         self.read_exact(&mut content)
-            .map_err(|e| Error::UnexpectedSocketClose(e))?;
+            .map_err(Error::UnexpectedSocketClose)?;
         self.read_exact(&mut padding)
-            .map_err(|e| Error::UnexpectedSocketClose(e))?;
+            .map_err(Error::UnexpectedSocketClose)?;
 
         Ok(Packet {
             type_id,
@@ -150,37 +155,39 @@ impl Connection {
         Ok(record)
     }
 
-    pub fn write_record(&mut self, record: Record) -> Result<(), Error> {
-        record.to_bytes(self).map_err(|e| Error::UnexpectedSocketClose(e))
-    }
-}
+    pub fn write_record(&mut self, record: Record) -> Result<(), io::Error> {
+        // We need the payload length in order to figure out the length of the padding
+        let mut payload = vec![];
+        record.to_bytes(&mut payload)?;
 
-#[cfg(test)]
-mod test {
-    use std::net::TcpListener;
+        // Length of Header + Length of Payload
+        let unpadded_len = 8 + payload.len();
 
-    use super::*;
+        // Figure out the closest factor of 8 that is greater than the unpadded length
+        let padded_len = unpadded_len.div_ceil(8) * 8;
 
-    #[test]
-    fn dotest() {
-        let socket = TcpListener::bind("localhost:8000").unwrap();
+        // The amount of padding is the difference between those numers
+        let padding = (padded_len - unpadded_len) as u8;
 
-        for conn in socket.incoming() {
-            let conn = conn.unwrap();
-            let mut conn = Connection::try_from(conn).unwrap();
-            let rec = conn.read_record().unwrap();
-            dbg!(rec);
-            let rec = conn.read_record().unwrap();
-            dbg!(rec);
-            let rec = conn.read_record().unwrap();
-            dbg!(rec);
-            let stdout = record::Stdout(String::from("Content-Type: text/html\n\nhello world").into_bytes());
-            let end = record::EndRequest {
-                app_status: 0,
-                protocol_status: record::FCGI_STATUS_REQUEST_COMPLETE,
-            };
-            conn.write_record(Record::Stdout(stdout)).unwrap();
-            conn.write_record(Record::EndRequest(end)).unwrap();
-        }
+        let request_id = if record::MANAGEMENT_RECORD_TYPES.contains(&record.type_id()) {
+            [0, 0]
+        } else {
+            [0, 1]
+        };
+
+        // Version + Record type
+        self.write_all(&[1, record.type_id()])?;
+        // Request ID (which is always 1)
+        self.write_all(&request_id)?;
+        // Payload length
+        self.write_all(&(payload.len() as u16).to_be_bytes())?;
+        // Padding length + Reserved field
+        self.write_all(&[padding, 0])?;
+        // Payload
+        self.write_all(&payload)?;
+        // Padding
+        self.write_all(&vec![0u8; padding as usize])?;
+        // Don't forget to flush.
+        self.flush()
     }
 }
