@@ -9,6 +9,9 @@ mod role;
 mod stdin;
 mod stdout;
 mod unknown;
+mod data;
+mod stderr;
+mod abort_request;
 
 use crate::error::Error;
 use begin_request::BeginRequest;
@@ -21,9 +24,12 @@ use std::io::{self, Cursor, Read, Write};
 use stdin::Stdin;
 use stdout::Stdout;
 use unknown::UnknownType;
+use data::Data;
+use stderr::Stderr;
+use abort_request::AbortRequest;
 
 const FCGI_BEGIN_REQUEST: u8 = 1;
-const FCGI_ABORT_REQUEST: u8 = 2;
+const FCGI_ABORT_REQUEST: u8 = 2;  
 const FCGI_END_REQUEST: u8 = 3;
 const FCGI_PARAMS: u8 = 4;
 const FCGI_STDIN: u8 = 5;
@@ -44,8 +50,11 @@ pub enum Record {
     BeginRequest(BeginRequest),
     Params(Params),
     Stdin(Stdin),
-    UnknownType(UnknownType),
+    Data(Data),
     Stdout(Stdout),
+    Stderr(Stderr),
+    AbortRequest(AbortRequest),
+    UnknownType(UnknownType),
     EndRequest(EndRequest),
 }
 
@@ -57,9 +66,12 @@ impl Record {
             Self::BeginRequest(_) => FCGI_BEGIN_REQUEST,
             Self::Params(_) => FCGI_PARAMS,
             Self::Stdin(_) => FCGI_STDIN,
-            Self::UnknownType(_) => FCGI_UNKNOWN_TYPE,
+            Self::Data(_) => FCGI_DATA,
             Self::Stdout(_) => FCGI_STDOUT,
+            Self::Stderr(_) => FCGI_STDERR,
+            Self::AbortRequest(_) => FCGI_ABORT_REQUEST,
             Self::EndRequest(_) => FCGI_END_REQUEST,
+            Self::UnknownType(_) => FCGI_UNKNOWN_TYPE,
         }
     }
 
@@ -72,12 +84,18 @@ impl Record {
             FCGI_BEGIN_REQUEST => Record::BeginRequest(BeginRequest::from_record_bytes(payload)?),
             FCGI_PARAMS => Record::Params(Params::from_record_bytes(payload)?),
             FCGI_STDIN => Record::Stdin(Stdin::from_record_bytes(payload)?),
+            FCGI_DATA => Record::Data(Data::from_record_bytes(payload)?),
+            FCGI_STDOUT => Record::Stdout(Stdout::from_record_bytes(payload)?),
+            FCGI_STDERR => Record::Stderr(Stderr::from_record_bytes(payload)?),
+            FCGI_ABORT_REQUEST => Record::AbortRequest(AbortRequest::from_record_bytes(payload)?),
+            FCGI_END_REQUEST => Record::EndRequest(EndRequest::from_record_bytes(payload)?),
             t => Record::UnknownType(UnknownType::from_record_bytes(payload)?),
         };
 
         Ok(record)
     }
 
+    // TODO: For management requests, set the request id to 0
     pub fn to_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         // We need the payload length in order to figure out the length of the padding
         let mut payload = vec![];
@@ -88,9 +106,12 @@ impl Record {
             Self::BeginRequest(r) => r.to_record_bytes(&mut payload),
             Self::Params(r) => r.to_record_bytes(&mut payload),
             Self::Stdin(r) => r.to_record_bytes(&mut payload),
-            Self::UnknownType(r) => r.to_record_bytes(&mut payload),
+            Self::Data(r) => r.to_record_bytes(&mut payload),
             Self::Stdout(r) => r.to_record_bytes(&mut payload),
+            Self::Stderr(r) => r.to_record_bytes(&mut payload),
+            Self::AbortRequest(r) => r.to_record_bytes(&mut payload),
             Self::EndRequest(r) => r.to_record_bytes(&mut payload),
+            Self::UnknownType(r) => r.to_record_bytes(&mut payload),
         };
 
         // Length of Header + Length of Payload
