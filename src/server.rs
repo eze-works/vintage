@@ -28,7 +28,7 @@ where
     ///
     /// Returns an error if a socket could not be bound
     /// (e.g. lack of permissions, the socket was already bound to some other process ...)
-    pub fn new<A: ToSocketAddrs>(handler: F, addr: A) -> Result<Self, io::Error> {
+    pub fn new<A: ToSocketAddrs>( addr: A, handler: F) -> Result<Self, io::Error> {
         let socket = TcpListener::bind(addr)?;
         Ok(Self {
             pool: threadpool::Builder::new().build(),

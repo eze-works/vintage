@@ -34,7 +34,7 @@ impl Request {
         if let Some("") = res {
             return None;
         }
-        return res;
+        res
     }
 
     /// Returns the body of the request.

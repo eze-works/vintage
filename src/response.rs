@@ -66,9 +66,9 @@ impl From<Response> for Stdout {
         let mut bytes = vec![];
 
         for (key, value) in value.headers {
-            write!(&mut bytes, "{key}: {value}\n").unwrap();
+            writeln!(&mut bytes, "{key}: {value}").unwrap();
         }
-        write!(&mut bytes, "\n").unwrap();
+        writeln!(&mut bytes).unwrap();
         bytes.append(&mut value.body);
         Stdout::new(bytes)
     }
