@@ -4,7 +4,7 @@ use std::io::{self, Write};
 /// A FastCGI `FCGI_STDERR` record
 ///
 /// Used to send error data from the FastCGI server to the client.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Stderr(Vec<u8>);
 
 impl Stderr {

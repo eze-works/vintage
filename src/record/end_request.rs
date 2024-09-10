@@ -28,7 +28,8 @@ impl EndRequest {
 
     pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&self.exit_code.to_be_bytes())?;
-        self.protocol_status.as_record_byte(writer)
+        self.protocol_status.as_record_byte(writer)?;
+        writer.write_all(&[0, 0, 0])
     }
 
     /// Creates a new `FCGI_END_REQUEST` record

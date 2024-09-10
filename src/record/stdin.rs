@@ -5,7 +5,7 @@ use std::io::{self, Write};
 ///
 /// A record used to send arbitrary data from the FastCGI client to the server.
 /// For example, this is used to send the POST request payload
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Stdin(Vec<u8>);
 
 impl Stdin {
@@ -20,5 +20,10 @@ impl Stdin {
     /// Creates a new `FCGI_STDIN` record
     pub fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
+    }
+
+    /// Takes ownership of the data, leaving an empty `Vec` in its place.
+    pub fn take(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.0)
     }
 }

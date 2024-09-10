@@ -4,7 +4,7 @@ use std::io::{self, Write};
 /// A FastCGI `FCGI_STDOUT` record
 ///
 /// Used to send arbitrary data from the FastCGI server to the client.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Stdout(Vec<u8>);
 
 impl Stdout {
@@ -21,3 +21,4 @@ impl Stdout {
         Self(bytes)
     }
 }
+

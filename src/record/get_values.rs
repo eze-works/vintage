@@ -24,8 +24,11 @@ impl GetValues {
     }
 
     /// Creates a new `FCGI_GET_VALUES` record
-    pub fn new(variables: Vec<String>) -> Self {
-        let key_values = variables.into_iter().map(|n| (n, String::new()));
+    pub fn new<I, T>(variables: I) -> Self 
+    where I: IntoIterator<Item = T>,
+          T: Into<String>
+    {
+        let key_values = variables.into_iter().map(|n| (n.into(), String::new()));
 
         Self {
             names: BTreeMap::from_iter(key_values),

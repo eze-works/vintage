@@ -41,8 +41,14 @@ const FCGI_GET_VALUES: u8 = 9;
 const FCGI_GET_VALUES_RESULT: u8 = 10;
 const FCGI_UNKNOWN_TYPE: u8 = 11;
 
-pub(super) const DISCRETE_RECORD_TYPES: [u8; 3] =
-    [FCGI_BEGIN_REQUEST, FCGI_ABORT_REQUEST, FCGI_GET_VALUES];
+pub(super) const DISCRETE_RECORD_TYPES: [u8; 6] = [
+    FCGI_GET_VALUES,
+    FCGI_GET_VALUES_RESULT,
+    FCGI_UNKNOWN_TYPE,
+    FCGI_BEGIN_REQUEST,
+    FCGI_ABORT_REQUEST,
+    FCGI_END_REQUEST,
+];
 
 pub(super) const MANAGEMENT_RECORD_TYPES: [u8; 3] =
     [FCGI_GET_VALUES, FCGI_GET_VALUES_RESULT, FCGI_UNKNOWN_TYPE];
@@ -51,7 +57,7 @@ pub(super) const MANAGEMENT_RECORD_TYPES: [u8; 3] =
 ///
 /// All data that flows between FastCGI client and server is carried in records. The variant used
 /// communicates the intent of the message
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Record {
     GetValues(GetValues),
     GetValuesResult(GetValuesResult),
@@ -103,7 +109,7 @@ impl Record {
         Ok(record)
     }
 
-    pub fn to_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub fn write_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         match self {
             Self::GetValues(r) => r.write_record_bytes(writer),
             Self::GetValuesResult(r) => r.write_record_bytes(writer),

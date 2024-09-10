@@ -19,7 +19,16 @@ impl Params {
     }
 
     /// Creates a new `FCGI_PARAMS` FastCGI record
-    pub fn new(pairs: BTreeMap<String, String>) -> Self {
+    pub fn new<I, T>(pairs: I) -> Self 
+        where I: IntoIterator<Item = (T, T)>,
+              T: Into<String>
+    {
+        let pairs = BTreeMap::from_iter(pairs.into_iter().map(|(n, v)| (n.into(), v.into())));
         Self(pairs)
+    }
+
+    /// Retrieves the value of the parameter `name`, if it exists
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0.get(name).map(|s| s.as_str())
     }
 }

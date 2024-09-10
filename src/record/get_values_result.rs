@@ -24,7 +24,11 @@ impl GetValuesResult {
     }
 
     /// Creates a new `FCGI_GET_VALUES_RESULT` record
-    pub fn new(values: BTreeMap<String, String>) -> Self {
+    pub fn new<I, T>(values: I) -> Self 
+        where I: IntoIterator<Item = (T, T)>,
+              T: Into<String>
+    {
+        let values = BTreeMap::from_iter(values.into_iter().map(|(n, v)| (n.into(), v.into())));
         Self { values }
     }
 }
