@@ -1,4 +1,4 @@
-use fcgiapp::{Response, Server};
+use vintage::{Response, Server};
 
 fn main() {
     let server = Server::new(
