@@ -12,4 +12,4 @@ mod server;
 
 pub use request::Request;
 pub use response::Response;
-pub use server::{NoReturn, Server};
+pub use server::{start, ServerHandle};

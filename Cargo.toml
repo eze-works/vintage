@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bufstream = "0.1.4"
+mio = { version = "1.0.2", features = ["os-ext", "net"] }
 paste = "1.0.15"
 thiserror = "1.0.63"
 threadpool = "1.8.1"

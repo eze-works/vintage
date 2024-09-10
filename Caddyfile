@@ -1,4 +1,6 @@
-http://localhost:3000 {
+localhost {
+  # Caddy's FastCGI support is implemented as an alternative `transport` under the `reverse_proxy` directive
+  # https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#the-fastcgi-transport
   reverse_proxy localhost:8000 {
     transport fastcgi
   }

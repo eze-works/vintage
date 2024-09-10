@@ -1,17 +1,15 @@
 use crate::error::Error;
 use crate::record::{self, *};
+use bufstream::BufStream;
+use mio::net::{TcpStream, UnixStream};
 #[cfg(test)]
 use std::collections::VecDeque;
-use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::net::TcpStream;
-#[cfg(target_family = "unix")]
-use std::os::unix::net::UnixStream;
+use std::io::{self, Read, Write};
 
 #[derive(Debug)]
 pub enum Connection {
-    Tcp(BufReader<TcpStream>, BufWriter<TcpStream>),
-    #[cfg(target_family = "unix")]
-    UnixSocket(BufReader<UnixStream>, BufWriter<UnixStream>),
+    Tcp(BufStream<TcpStream>),
+    UnixSocket(BufStream<UnixStream>),
     #[cfg(test)]
     Test(VecDeque<u8>),
 }
@@ -19,9 +17,8 @@ pub enum Connection {
 impl Write for Connection {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp(_, w) => w.write(buf),
-            #[cfg(target_family = "unix")]
-            Connection::UnixSocket(_, w) => w.write(buf),
+            Connection::Tcp(w) => w.write(buf),
+            Connection::UnixSocket(w) => w.write(buf),
             #[cfg(test)]
             Connection::Test(w) => w.write(buf),
         }
@@ -29,9 +26,8 @@ impl Write for Connection {
 
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
-            Connection::Tcp(_, w) => w.flush(),
-            #[cfg(target_family = "unix")]
-            Connection::UnixSocket(_, w) => w.flush(),
+            Connection::Tcp(w) => w.flush(),
+            Connection::UnixSocket(w) => w.flush(),
             #[cfg(test)]
             Connection::Test(w) => w.flush(),
         }
@@ -41,34 +37,23 @@ impl Write for Connection {
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp(r, _) => r.read(buf),
-            #[cfg(target_family = "unix")]
-            Connection::UnixSocket(r, _) => r.read(buf),
+            Connection::Tcp(r) => r.read(buf),
+            Connection::UnixSocket(r) => r.read(buf),
             #[cfg(test)]
             Connection::Test(r) => r.read(buf),
         }
     }
 }
 
-impl TryFrom<TcpStream> for Connection {
-    type Error = io::Error;
-    fn try_from(value: TcpStream) -> Result<Self, Self::Error> {
-        let reader = value;
-        let writer = reader.try_clone()?;
-        Ok(Self::Tcp(BufReader::new(reader), BufWriter::new(writer)))
+impl From<TcpStream> for Connection {
+    fn from(value: TcpStream) -> Self {
+        Connection::Tcp(BufStream::new(value))
     }
 }
 
-#[cfg(target_family = "unix")]
-impl TryFrom<UnixStream> for Connection {
-    type Error = io::Error;
-    fn try_from(value: UnixStream) -> Result<Self, Self::Error> {
-        let reader = value;
-        let writer = reader.try_clone()?;
-        Ok(Self::UnixSocket(
-            BufReader::new(reader),
-            BufWriter::new(writer),
-        ))
+impl From<UnixStream> for Connection {
+    fn from(value: UnixStream) -> Self {
+        Connection::UnixSocket(BufStream::new(value))
     }
 }
 

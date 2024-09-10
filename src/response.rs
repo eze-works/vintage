@@ -2,7 +2,7 @@ use crate::record::Stdout;
 use std::collections::BTreeMap;
 use std::io::Write;
 
-/// A FastCGI response
+/// A response from a FastCGI server.
 #[derive(Debug, Clone)]
 pub struct Response {
     headers: BTreeMap<String, String>,

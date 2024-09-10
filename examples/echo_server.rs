@@ -1,20 +1,26 @@
-use vintage::{Response, Server};
+use vintage::{Request, Response};
+
+fn handler1(mut request: Request) -> Response {
+    dbg!(&request);
+    Response::new()
+        .status(200)
+        .content_type("text/html")
+        .body("THIS IS HANDLER 1")
+}
+
+fn handler2(mut request: Request) -> Response {
+    dbg!(&request);
+    Response::new()
+        .status(200)
+        .content_type("text/html")
+        .body("THIS IS HANDLER 2")
+}
 
 fn main() {
-    let server = Server::new(
-        "localhost:8000",
-        |request| {
-            let path = request.path_info().unwrap();
+    let server1 = vintage::start("localhost:8000", handler1).unwrap();
+    let server2 = vintage::start("localhost:8001", handler2).unwrap();
+    println!("BOTH SERVERS STARTED");
 
-            let mut response = Response::new()
-                .status(200)
-                .content_type("text/html")
-                .body(path);
-
-            response
-        }
-    )
-    .unwrap();
-
-    server.run();
+    server1.stop();
+    server2.stop();
 }
