@@ -6,6 +6,10 @@
 mod connection;
 mod error;
 pub mod record;
+mod request;
+mod response;
 mod server;
 
-pub use server::{NoReturn, Request, Response, Server};
+pub use request::Request;
+pub use response::Response;
+pub use server::{NoReturn, Server};

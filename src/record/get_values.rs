@@ -23,10 +23,16 @@ impl GetValues {
         pairs::to_record_bytes(&self.names, writer)
     }
 
+    /// Returns an iterator over the list of variables whose values have been requested
+    pub fn get_variables(&self) -> impl Iterator<Item = &str> {
+        self.names.keys().map(|k| k.as_str())
+    }
+
     /// Creates a new `FCGI_GET_VALUES` record
-    pub fn new<I, T>(variables: I) -> Self 
-    where I: IntoIterator<Item = T>,
-          T: Into<String>
+    pub fn new<I, T>(variables: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
     {
         let key_values = variables.into_iter().map(|n| (n.into(), String::new()));
 

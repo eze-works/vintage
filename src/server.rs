@@ -1,7 +1,8 @@
 use crate::connection::Connection;
 use crate::error::Error;
 use crate::record::*;
-use std::collections::BTreeMap;
+use crate::request::Request;
+use crate::response::Response;
 use std::io;
 use std::net::{TcpListener, ToSocketAddrs};
 use std::sync::Arc;
@@ -55,7 +56,10 @@ where
     //
     // There are two expected flows;
     // + We receive a `GetValues` request to which we respond.
-    // + We receive a `BeginRequest` request followed by Params and Stdin. Package these up into a `Request` and run the handler
+    // + We receive a `BeginRequest` request followed by Params and Stdin. Respond using Stdout followed by EndRequest
+    //
+    // What about the AbortRequest message you ask?
+    // We are not multiplexing connections, so the client can abort requests by closing the connection.
     fn fast_cgi(mut conn: Connection, handler: Arc<F>) {
         let first_record = match conn.read_record() {
             Ok(r) => r,
@@ -112,13 +116,8 @@ where
             body: stdin,
         });
 
-        let stdout = response.stdout.unwrap_or_default();
-
+        let stdout = Stdout::from(response);
         conn.write_record(&Record::Stdout(stdout)).unwrap();
-        if let Some(stderr) = response.stderr {
-            conn.write_record(&Record::Stderr(stderr)).unwrap();
-        }
-
         conn.write_record(&Record::EndRequest(EndRequest::new(
             0,
             ProtocolStatus::RequestComplete,
@@ -141,74 +140,14 @@ fn handle_error(conn: &mut Connection, e: Error) {
         _ => {}
     }
 }
-fn expect_record(conn: &mut Connection) -> Option<Record> {
-    match conn.read_record() {
-        e @ Err(Error::UnsupportedRole(_)) => {
-            eprintln!("{e:?}");
-            let response = Record::EndRequest(EndRequest::new(0, ProtocolStatus::UnknownRole));
-            let _ = conn.write_record(&response);
-            None
+
+fn respond_with_values(conn: &mut Connection, record: GetValues) {
+    for variable in record.get_variables() {
+        // If the client cares, tell it we do not want to multiplex connections
+        if variable == "FCGI_MPXS_CONNS" {
+            let response = GetValuesResult::new([("FCGI_MPXS_CONNS", "0")]);
+            let _ = conn.write_record(&Record::GetValuesResult(response));
+            break;
         }
-        e @ Err(Error::MultiplexingUnsupported) => {
-            eprintln!("{e:?}");
-            let response =
-                Record::EndRequest(EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported));
-            let _ = conn.write_record(&response);
-            None
-        }
-        Err(_) => None,
-        Ok(record) => Some(record),
-    }
-}
-
-fn respond_with_values(_conn: &mut Connection, _record: GetValues) {
-    todo!()
-}
-
-pub struct Request {
-    vars: Params,
-    body: Stdin,
-}
-
-impl Request {
-    /// Returns the value of the CGI meta-variable `name`, if it exists
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.vars.get(name)
-    }
-
-    /// Returns the body of the request.
-    ///
-    /// The returned `Ved` will be empty if the request had no body.
-    /// If there was a body, note that subsequent invocations will return an empty `Vec`.
-    pub fn read_body(&mut self) -> Vec<u8> {
-        self.body.take()
-    }
-}
-
-pub struct Response {
-    stdout: Option<Stdout>,
-    stderr: Option<Stderr>,
-}
-
-impl Response {
-    /// Returns an empty FastCGI response
-    pub fn new() -> Self {
-        Self {
-            stdout: None,
-            stderr: None,
-        }
-    }
-
-    /// Set the body for the FastCGI response
-    pub fn set_body(&mut self, output: Vec<u8>) {
-        self.stdout = Some(Stdout::new(output));
-    }
-
-    /// Set the errror stream of the FastCGI response
-    ///
-    /// Note: The contents of this stream are at best logged by the FastCGI client.
-    /// At worst, they are ignored
-    pub fn set_errors(&mut self, errors: Vec<u8>) {
-        self.stderr = Some(Stderr::new(errors));
     }
 }

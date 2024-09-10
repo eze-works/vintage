@@ -1,16 +1,18 @@
 use fcgiapp::{Response, Server};
 
 fn main() {
-    let server = Server::new(|request| {
-        let mut response = Response::new();
-        let path = request.get("PATH_INFO").unwrap();
-        let body = format!("Content-Type: text/html\n\n{path}");
-        response.set_body(body.into_bytes());
-
-        response
-    }, "localhost:8000").unwrap();
+    let server = Server::new(
+        |request| {
+            let path = request.path_info().unwrap();
+            let mut response = Response::new()
+                .status(200)
+                .content_type("text/html")
+                .body(path);
+            response
+        },
+        "localhost:8000",
+    )
+    .unwrap();
 
     server.run();
 }
-
-
