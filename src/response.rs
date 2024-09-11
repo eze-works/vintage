@@ -13,6 +13,7 @@ pub struct Response {
 
 impl Default for Response {
     fn default() -> Self {
+        /// Creates an empty 200 OK response
         let default_headers = BTreeMap::from_iter([
             ("Status".into(), "200".into()),
             ("Content-Type".into(), "text/plain".into()),
@@ -121,5 +122,27 @@ impl Response {
         Response::default()
             .set_body(str.to_string())
             .set_content_type("application/json")
+    }
+
+    /// Creates a temporary redirection response.
+    ///
+    /// The browser receiving the request will to re-make the request with `path` as the new target
+    /// with method and body unchanged.
+    ///
+    /// Search engines receiving this response will not attribute links to the original URL to the
+    /// new resource, meaning no SEO value is transferred to the new URL.
+    pub fn redirect(path: &str) -> Response {
+        Response::new().set_location(path).set_status(307)
+    }
+
+    /// Creates a permanent redirection response.
+    ///
+    /// The browser receiving the request will to re-make the request with `path` as the new target
+    /// with method and body unchanged.
+    ///
+    /// Search engines receiving this response will attribute links to the original URL to the
+    /// redirected resource, passing the SEO ranking to the new URL.
+    pub fn permanent_redirect(path: &str) -> Response {
+        Response::new().set_location(path).set_status(308)
     }
 }

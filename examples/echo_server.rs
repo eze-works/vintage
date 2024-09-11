@@ -7,11 +7,12 @@ fn handler1(mut request: Request) -> Response {
 
 fn handler2(mut request: Request) -> Response {
     dbg!(&request);
-    Response::text("Hello world")
+    Response::redirect("/")
 }
 
 fn handler3(mut request: Request) -> Response {
-    Response::json("[1]")
+    dbg!(&request);
+    Response::redirect("/two")
 }
 
 fn main() {
