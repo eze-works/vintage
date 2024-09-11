@@ -38,7 +38,8 @@ const SHUTDOWN: Token = Token(1);
 pub fn start<A, F>(addr: A, handler: F) -> Result<ServerHandle, io::Error>
 where
     A: ToSocketAddrs,
-    F: 'static + Send + Sync + Fn(Request) -> Result<Response, Box<dyn std::error::Error>>,
+    F: 'static + Sync + Send,
+    F: Fn(Request) -> Response,
 {
     // One of the requirements is that the user of the library be able to shutdown the server
     // gracefully. This means that there should be some way for the user to say "finish all
@@ -132,7 +133,8 @@ impl ServerHandle {
 
 impl<F> Server<F>
 where
-    F: 'static + Send + Sync + Fn(Request) -> Result<Response, Box<dyn std::error::Error>>,
+    F: 'static + Sync + Send,
+    F: Fn(Request) -> Response,
 {
     fn server_loop(mut self) -> Result<(), io::Error> {
         // `shutdown_threadpool` should always be called before exiting this function, regardless of
@@ -257,20 +259,12 @@ where
         });
 
         let mut stdout = Stdout(vec![]);
-
-        if let Ok(body) = &response {
-            body.write_record_bytes(&mut stdout.0);
-        }
-
+        let _ = response.write_stdout_bytes(&mut stdout.0);
         let _ = conn.write_record(&Record::Stdout(stdout));
 
-        let exit_code = if let Err(err) = &response {
-            let mut msg = vec![];
-            writeln!(&mut msg, "{}", err.to_string()).unwrap();
-            for child_err in std::iter::successors(Some(err.as_ref()), |err| err.source()) {
-                writeln!(&mut msg, "{}", child_err.to_string()).unwrap();
-            }
-            let mut stderr = Stderr(msg);
+        let exit_code = if let Some(_) = response.get_error() {
+            let mut stderr = Stderr(vec![]);
+            let _ = response.write_stderr_bytes(&mut stderr.0);
             let _ = conn.write_record(&Record::Stderr(stderr));
             1
         } else {

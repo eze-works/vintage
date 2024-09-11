@@ -56,7 +56,7 @@ macro_rules! impl_meta {
         $(
         paste::paste! {
             #[doc = $doc]
-            pub fn [<$name:lower>](&self) -> Option<&str> {
+            pub fn [<get_$name:lower>](&self) -> Option<&str> {
                 self.get(stringify!($name))
             }
 
