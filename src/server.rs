@@ -6,7 +6,7 @@ use crate::response::Response;
 use mio::event::Events;
 use mio::net::TcpListener;
 use mio::{Interest, Poll, Token, Waker};
-use std::io;
+use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
@@ -38,7 +38,7 @@ const SHUTDOWN: Token = Token(1);
 pub fn start<A, F>(addr: A, handler: F) -> Result<ServerHandle, io::Error>
 where
     A: ToSocketAddrs,
-    F: 'static + Send + Sync + Fn(Request) -> Response,
+    F: 'static + Send + Sync + Fn(Request) -> Result<Response, Box<dyn std::error::Error>>,
 {
     // One of the requirements is that the user of the library be able to shutdown the server
     // gracefully. This means that there should be some way for the user to say "finish all
@@ -75,6 +75,8 @@ where
         .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
 
     let mut socket = TcpListener::bind(address)?;
+
+    log::info!("FastCGI Server listening on {address}");
 
     let poll = Poll::new()?;
 
@@ -130,7 +132,7 @@ impl ServerHandle {
 
 impl<F> Server<F>
 where
-    F: 'static + Send + Sync + Fn(Request) -> Response,
+    F: 'static + Send + Sync + Fn(Request) -> Result<Response, Box<dyn std::error::Error>>,
 {
     fn server_loop(mut self) -> Result<(), io::Error> {
         // `shutdown_threadpool` should always be called before exiting this function, regardless of
@@ -142,6 +144,7 @@ where
             match self.poll.poll(&mut self.events, None) {
                 Ok(_) => {}
                 Err(err) => {
+                    log::warn!(error:err = err; "Poll call failed. Server loop will exit");
                     Self::shutdown_threadpool(pool);
                     return Err(err);
                 }
@@ -160,6 +163,7 @@ where
                             }
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                             Err(err) => {
+                                log::warn!(error:err = err; "Socket accept call failed. Server loop will exit");
                                 Self::shutdown_threadpool(pool);
                                 return Err(err);
                             }
@@ -167,7 +171,21 @@ where
                     },
                     SHUTDOWN => {
                         Self::shutdown_threadpool(pool);
-                        let _ = self.signal_shutdown.send(());
+                        if let Err(err) = self.signal_shutdown.send(()) {
+                            // The only way this happens is if the main thread called
+                            // `Server::server_waker.wake()` then immediately dropped
+                            // the `Server::observe_shutdown` receiver such that this fails to
+                            // send.
+                            //
+                            // But that cannot be, since we don't do that ... and those properties
+                            // are not part of the public API.
+                            //
+                            // That said if somehow, it does happen, I do still want to know
+                            log::error!(
+                                "unreachable code reached! failed to notify main thread of shutdown."
+                            );
+                            unreachable!("failed to notify main thread of shutdown");
+                        }
                         return Ok(());
                     }
                     _ => unreachable!(),
@@ -189,25 +207,20 @@ where
     //
     // What about the AbortRequest message you ask?
     // We are not multiplexing connections, so the client can abort requests by closing the connection.
-    fn fast_cgi(mut conn: Connection, handler: Arc<F>)
-    where
-        F: 'static + Send + Sync + Fn(Request) -> Response,
-    {
+    fn fast_cgi(mut conn: Connection, handler: Arc<F>) {
         let first_record = match conn.read_record() {
             Ok(r) => r,
             Err(e) => {
-                Self::handle_error(&mut conn, e);
-                return;
+                return Self::handle_error(&mut conn, e);
             }
         };
 
         if let Record::GetValues(r) = first_record {
-            Self::respond_with_values(&mut conn, r);
-            return;
+            return Self::respond_with_values(&mut conn, r);
         }
 
         let Record::BeginRequest(begin) = first_record else {
-            eprintln!("Unexpected first record");
+            log::error!("FastCGI connection began with unexpected record. Closing connection");
             return;
         };
 
@@ -215,31 +228,29 @@ where
             let response =
                 Record::EndRequest(EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported));
             let _ = conn.write_record(&response);
-            eprintln!("Keep alive is not supported");
+            log::warn!("FastCGI client wanted keep-alive. It is not supported. Closing connection");
             return;
         }
 
         let params = match conn.expect_params() {
             Ok(params) => params,
             Err(None) => {
-                eprintln!("Expected Params");
+                log::error!("FastCGI connection missing Params record. Closing connection");
                 return;
             }
             Err(Some(e)) => {
-                Self::handle_error(&mut conn, e);
-                return;
+                return Self::handle_error(&mut conn, e);
             }
         };
 
         let stdin = match conn.expect_stdin() {
             Ok(stdin) => stdin,
             Err(None) => {
-                eprintln!("Expected Stdin");
+                log::error!("FastCGI connection missing Stdin record. Closing connection");
                 return;
             }
             Err(Some(e)) => {
-                Self::handle_error(&mut conn, e);
-                return;
+                return Self::handle_error(&mut conn, e);
             }
         };
 
@@ -248,13 +259,31 @@ where
             body: stdin,
         });
 
-        let stdout = Stdout::from(response);
-        conn.write_record(&Record::Stdout(stdout)).unwrap();
-        conn.write_record(&Record::EndRequest(EndRequest::new(
-            0,
+        let mut stdout = Stdout(vec![]);
+
+        if let Ok(body) = &response {
+            body.write_record_bytes(&mut stdout.0);
+        }
+
+        let _ = conn.write_record(&Record::Stdout(stdout));
+
+        let exit_code = if let Err(err) = &response {
+            let mut msg = vec![];
+            writeln!(&mut msg, "{}", err.to_string()).unwrap();
+            for child_err in std::iter::successors(Some(err.as_ref()), |err| err.source()) {
+                writeln!(&mut msg, "{}", child_err.to_string()).unwrap();
+            }
+            let mut stderr = Stderr(msg);
+            let _ = conn.write_record(&Record::Stderr(stderr));
+            1
+        } else {
+            0
+        };
+
+        let _ = conn.write_record(&Record::EndRequest(EndRequest::new(
+            exit_code,
             ProtocolStatus::RequestComplete,
-        )))
-        .unwrap();
+        )));
     }
 
     fn handle_error(conn: &mut Connection, e: Error) {
@@ -262,13 +291,17 @@ where
             Error::UnsupportedRole(_) => {
                 let response = Record::EndRequest(EndRequest::new(0, ProtocolStatus::UnknownRole));
                 let _ = conn.write_record(&response);
+                log::warn!("FastCGI client requested an unknown role. Closing connection");
             }
             Error::MultiplexingUnsupported => {
                 let response =
                     Record::EndRequest(EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported));
                 let _ = conn.write_record(&response);
+                log::warn!("FastCGI client requested connection multiplixing. It is not supported. Closing connection");
             }
-            _ => {}
+            e => {
+                log::warn!(error:err = e; "Error reading FastCGI record. Closing connection");
+            }
         }
     }
 

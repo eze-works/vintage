@@ -5,14 +5,14 @@ use std::io::{self, Write};
 ///
 /// Used to send error data from the FastCGI server to the client.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct Stderr(Vec<u8>);
+pub struct Stderr(pub Vec<u8>);
 
 impl Stderr {
-    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         Ok(Self(bytes))
     }
 
-    pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&self.0)
     }
 

@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 bufstream = "0.1.4"
+log = { version = "0.4.22", features = ["kv_std"] }
 mio = { version = "1.0.2", features = ["os-ext", "net"] }
 paste = "1.0.15"
 thiserror = "1.0.63"
 threadpool = "1.8.1"
+
+[dev-dependencies]
+env_logger = { version = "0.11.5", features = ["unstable-kv"] }

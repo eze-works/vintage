@@ -1,6 +1,6 @@
 use crate::record::Stdout;
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{self, Write};
 
 /// A response from a FastCGI server.
 #[derive(Debug, Clone)]
@@ -59,17 +59,12 @@ impl Response {
         self.body = body;
         self
     }
-}
 
-impl From<Response> for Stdout {
-    fn from(mut value: Response) -> Self {
-        let mut bytes = vec![];
-
-        for (key, value) in value.headers {
-            writeln!(&mut bytes, "{key}: {value}").unwrap();
+    pub(crate) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+        for (key, value) in self.headers.iter() {
+            writeln!(writer, "{key}: {value}")?;
         }
-        writeln!(&mut bytes).unwrap();
-        bytes.append(&mut value.body);
-        Stdout::new(bytes)
+        writeln!(writer)?;
+        writer.write_all(&self.body)
     }
 }

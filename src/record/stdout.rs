@@ -5,14 +5,14 @@ use std::io::{self, Write};
 ///
 /// Used to send arbitrary data from the FastCGI server to the client.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct Stdout(Vec<u8>);
+pub struct Stdout(pub Vec<u8>);
 
 impl Stdout {
-    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         Ok(Self(bytes))
     }
 
-    pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&self.0)
     }
 
@@ -20,5 +20,9 @@ impl Stdout {
     pub fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
-}
 
+    /// Append `bytes` to the existing content
+    pub fn append(&mut self, mut bytes: Vec<u8>) {
+        self.0.append(&mut bytes);
+    }
+}

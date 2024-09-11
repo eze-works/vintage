@@ -17,6 +17,7 @@ fn handler2(mut request: Request) -> Response {
 }
 
 fn main() {
+    env_logger::init();
     let server1 = vintage::start("localhost:8000", handler1).unwrap();
     let server2 = vintage::start("localhost:8001", handler2).unwrap();
     println!("BOTH SERVERS STARTED");
