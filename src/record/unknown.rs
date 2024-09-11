@@ -13,7 +13,7 @@ use std::io::{self, Write};
 pub struct UnknownType(u8);
 
 impl UnknownType {
-    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         let buffer: [u8; 8] = bytes
             .try_into()
             .map_err(|_| Error::MalformedRecordPayload("UnknownType"))?;
@@ -21,11 +21,10 @@ impl UnknownType {
         Ok(Self(buffer[0]))
     }
 
-    pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&[self.0, 0, 0, 0, 0, 0, 0, 0])
     }
 
-    /// Creates a new `FCGI_UNKNOWN_TYPE` record
     pub fn new(type_id: u8) -> Self {
         Self(type_id)
     }

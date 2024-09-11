@@ -14,7 +14,7 @@ use std::io::{self, Write};
 pub struct AbortRequest;
 
 impl AbortRequest {
-    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         // This record type has no body
         if !bytes.is_empty() {
             return Err(Error::MalformedRecordPayload("AbortRequest"));
@@ -22,7 +22,7 @@ impl AbortRequest {
         Ok(AbortRequest)
     }
 
-    pub(super) fn write_record_bytes<W: Write>(&self, _writer: &mut W) -> Result<(), io::Error> {
+    pub fn write_record_bytes<W: Write>(&self, _writer: &mut W) -> Result<(), io::Error> {
         Ok(())
     }
 }

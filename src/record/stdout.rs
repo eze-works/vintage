@@ -16,13 +16,7 @@ impl Stdout {
         writer.write_all(&self.0)
     }
 
-    /// Creates a new `FCGI_STDOUT` record
     pub fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
-    }
-
-    /// Append `bytes` to the existing content
-    pub fn append(&mut self, mut bytes: Vec<u8>) {
-        self.0.append(&mut bytes);
     }
 }

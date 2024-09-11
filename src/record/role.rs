@@ -7,13 +7,8 @@ use std::io::{self, Write};
 /// The most familiar is the Responder role, which is the only role implemented by this crate because no one uses the other two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    /// The application receives all the information associated with an HTTP request and generates an HTTP response
     Responder,
-    /// The application receives all the information associated with an HTTP request and generates an authorized/unauthorized decision.
     Auhorizer,
-    /// The application receives all the information associated with an HTTP request, plus an extra
-    /// stream of data from a file stored on the Web server, and generates a "filtered" version of
-    /// the data stream as an HTTP response.
     Filter,
 }
 

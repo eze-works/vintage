@@ -5,7 +5,7 @@
 
 mod connection;
 mod error;
-pub mod record;
+mod record;
 mod request;
 mod response;
 mod server;

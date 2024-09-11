@@ -204,9 +204,6 @@ where
     // There are two expected flows;
     // + We receive a `GetValues` request to which we respond.
     // + We receive a `BeginRequest` request followed by Params and Stdin. Respond using Stdout followed by EndRequest
-    //
-    // What about the AbortRequest message you ask?
-    // We are not multiplexing connections, so the client can abort requests by closing the connection.
     fn fast_cgi(mut conn: Connection, handler: Arc<F>) {
         let first_record = match conn.read_record() {
             Ok(r) => r,

@@ -13,22 +13,20 @@ pub struct GetValues {
 }
 
 impl GetValues {
-    pub(super) fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         Ok(Self {
             names: pairs::from_record_bytes(bytes)?,
         })
     }
 
-    pub(super) fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+    pub fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         pairs::to_record_bytes(&self.names, writer)
     }
 
-    /// Returns an iterator over the list of variables whose values have been requested
     pub fn get_variables(&self) -> impl Iterator<Item = &str> {
         self.names.keys().map(|k| k.as_str())
     }
 
-    /// Creates a new `FCGI_GET_VALUES` record
     pub fn new<I, T>(variables: I) -> Self
     where
         I: IntoIterator<Item = T>,
