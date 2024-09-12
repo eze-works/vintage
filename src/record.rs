@@ -42,7 +42,7 @@ const FCGI_GET_VALUES: u8 = 9;
 const FCGI_GET_VALUES_RESULT: u8 = 10;
 const FCGI_UNKNOWN_TYPE: u8 = 11;
 
-pub(super) const DISCRETE_RECORD_TYPES: [u8; 6] = [
+pub const DISCRETE_RECORD_TYPES: [u8; 6] = [
     FCGI_GET_VALUES,
     FCGI_GET_VALUES_RESULT,
     FCGI_UNKNOWN_TYPE,
@@ -50,11 +50,6 @@ pub(super) const DISCRETE_RECORD_TYPES: [u8; 6] = [
     FCGI_ABORT_REQUEST,
     FCGI_END_REQUEST,
 ];
-
-pub(super) const MANAGEMENT_RECORD_TYPES: [u8; 3] =
-    [FCGI_GET_VALUES, FCGI_GET_VALUES_RESULT, FCGI_UNKNOWN_TYPE];
-
-
 
 /// A single FastCGI message
 ///
@@ -90,6 +85,10 @@ impl Record {
             Self::EndRequest(_) => FCGI_END_REQUEST,
             Self::UnknownType(_) => FCGI_UNKNOWN_TYPE,
         }
+    }
+
+    pub fn is_management_record(&self) -> bool {
+            matches!(self, Self::GetValues(_) | Self::GetValuesResult(_) | Self::UnknownType(_))
     }
 
     pub fn from_bytes(type_id: u8, payload: Vec<u8>) -> Result<Self, Error> {

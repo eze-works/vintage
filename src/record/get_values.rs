@@ -7,7 +7,7 @@ use std::io::{self, Write};
 ///
 // A FastCGI client can query specific variables within a FastCGI server using this record type.
 // It is designed to allow querying an open-ended set of variables.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GetValues {
     names: BTreeMap<String, String>,
 }
@@ -27,15 +27,8 @@ impl GetValues {
         self.names.keys().map(|k| k.as_str())
     }
 
-    pub fn new<I, T>(variables: I) -> Self
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<String>,
-    {
-        let key_values = variables.into_iter().map(|n| (n.into(), String::new()));
-
-        Self {
-            names: BTreeMap::from_iter(key_values),
-        }
+    pub fn add(mut self, name: impl std::fmt::Display) -> Self {
+        self.names.insert(name.to_string(), String::new());
+        self
     }
 }

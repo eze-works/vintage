@@ -6,7 +6,7 @@ use std::io::{self, Write};
 /// A FastCGI `FCGI_PARAMS` record
 ///
 /// Used for sending name-value pairs between FastCGI server and client
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Params(BTreeMap<String, String>);
 
 impl Params {
@@ -18,13 +18,13 @@ impl Params {
         pairs::to_record_bytes(&self.0, writer)
     }
 
-    pub fn new<I, T>(pairs: I) -> Self
+    pub fn add<K, V>(mut self, key: K, value: V) -> Self
     where
-        I: IntoIterator<Item = (T, T)>,
-        T: std::fmt::Display,
+        K: std::fmt::Display,
+        V: std::fmt::Display,
     {
-        let pairs = BTreeMap::from_iter(pairs.into_iter().map(|(n, v)| (n.to_string(), v.to_string())));
-        Self(pairs)
+        self.0.insert(key.to_string(), value.to_string());
+        self
     }
 
     pub fn get(&self, name: &str) -> Option<&str> {

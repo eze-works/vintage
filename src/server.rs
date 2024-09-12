@@ -330,7 +330,7 @@ where
         for variable in record.get_variables() {
             // If the client cares, tell it we do not want to multiplex connections
             if variable == "FCGI_MPXS_CONNS" {
-                let response = GetValuesResult::new([("FCGI_MPXS_CONNS", "0")]);
+                let response = GetValuesResult::default().add("FCGI_MPXS_CONNS", "0");
                 let _ = conn.write_record(&Record::GetValuesResult(response));
                 break;
             }

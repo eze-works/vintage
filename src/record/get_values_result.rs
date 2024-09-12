@@ -6,7 +6,7 @@ use std::io::{self, Write};
 /// A FastCGI `FCGI_GET_VALUES_RESULT` record
 ///
 /// This is sent by a FastCGI server in response to a request with a `GetValues` record.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GetValuesResult {
     values: BTreeMap<String, String>,
 }
@@ -22,12 +22,12 @@ impl GetValuesResult {
         pairs::to_record_bytes(&self.values, writer)
     }
 
-    pub fn new<I, T>(values: I) -> Self
+    pub fn add<K, V>(mut self, key: K, value: V) -> Self
     where
-        I: IntoIterator<Item = (T, T)>,
-        T: Into<String>,
+        K: std::fmt::Display,
+        V: std::fmt::Display,
     {
-        let values = BTreeMap::from_iter(values.into_iter().map(|(n, v)| (n.into(), v.into())));
-        Self { values }
+        self.values.insert(key.to_string(), value.to_string());
+        self
     }
 }

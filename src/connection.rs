@@ -160,7 +160,7 @@ impl Connection {
         // The amount of padding is the difference between those numers
         let padding = (padded_len - unpadded_len) as u8;
 
-        let request_id = if record::MANAGEMENT_RECORD_TYPES.contains(&record.type_id()) {
+        let request_id = if record.is_management_record() {
             [0, 0]
         } else {
             [0, 1]
@@ -237,31 +237,30 @@ mod round_trip_tests {
 
     #[test]
     fn get_values() {
-        let vars: [&str; 0] = [];
         round_trip(
-            [Record::GetValues(GetValues::new(vars))],
-            Record::GetValues(GetValues::new(vars)),
+            [Record::GetValues(GetValues::default())],
+            Record::GetValues(GetValues::default()),
         );
         round_trip(
-            [Record::GetValues(GetValues::new(["FCGI_MAX_CONNS"]))],
-            Record::GetValues(GetValues::new(["FCGI_MAX_CONNS"])),
+            [Record::GetValues(
+                GetValues::default().add("FCGI_MAX_CONNS"),
+            )],
+            Record::GetValues(GetValues::default().add("FCGI_MAX_CONNS")),
         );
     }
 
     #[test]
     fn get_values_result() {
-        let empty: [(&str, &str); 0] = [];
         round_trip(
-            [Record::GetValuesResult(GetValuesResult::new(empty))],
-            Record::GetValuesResult(GetValuesResult::new(empty)),
+            [Record::GetValuesResult(GetValuesResult::default())],
+            Record::GetValuesResult(GetValuesResult::default()),
         );
 
         round_trip(
-            [Record::GetValuesResult(GetValuesResult::new([(
-                "FCGI_MAX_REQS",
-                "1",
-            )]))],
-            Record::GetValuesResult(GetValuesResult::new([("FCGI_MAX_REQS", "1")])),
+            [Record::GetValuesResult(
+                GetValuesResult::default().add("FCGI_MAX_REQS", "1"),
+            )],
+            Record::GetValuesResult(GetValuesResult::default().add("FCGI_MAX_REQS", "1")),
         );
     }
 
@@ -286,19 +285,17 @@ mod round_trip_tests {
 
     #[test]
     fn params() {
-        let empty: [(&str, &str); 0] = [];
-
         round_trip(
-            [Record::Params(Params::new(empty))],
-            Record::Params(Params::new(empty)),
+            [Record::Params(Params::default())],
+            Record::Params(Params::default()),
         );
 
         round_trip(
             [
-                Record::Params(Params::new([("PATH", "/home")])),
-                Record::Params(Params::new(empty)),
+                Record::Params(Params::default().add("PATH", "/home")),
+                Record::Params(Params::default()),
             ],
-            Record::Params(Params::new([("PATH", "/home")])),
+            Record::Params(Params::default().add("PATH", "/home")),
         );
     }
 
