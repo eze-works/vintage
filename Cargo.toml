@@ -2,6 +2,12 @@
 name = "vintage"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+readme = "README.md"
+description = "A multi-threaded FastCGI server"
+repository = "https://github.com/eze-works/vintage"
+categories = ["network-programming", "web-programming"]
+keywords = ["fastcgi", "cgi"]
 
 [dependencies]
 bufstream = "0.1.4"
