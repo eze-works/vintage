@@ -225,109 +225,87 @@ mod round_trip_tests {
     // Some records are "stream" records, so this function allows sending a sequence of records and
     // asserting that they come out on the "other side" stiched together into one record
     #[track_caller]
-    fn round_trip<T: IntoIterator<Item = Record>>(send: T, receive: Record) {
+    fn round_trip<I, R, R2>(send: I, receive: R2)
+    where
+        I: IntoIterator<Item = R>,
+        R: Into<Record>,
+        R2: Into<Record>,
+    {
         let mut connection = Connection::Test(VecDeque::new());
 
         for r in send.into_iter() {
-            connection.write_record(&r).unwrap();
+            let record = r.into();
+            connection.write_record(&record).unwrap();
         }
         let from_client = connection.read_record().unwrap();
-        assert_eq!(receive, from_client);
+        assert_eq!(receive.into(), from_client);
     }
 
     #[test]
     fn get_values() {
+        round_trip([GetValues::default()], GetValues::default());
         round_trip(
-            [Record::GetValues(GetValues::default())],
-            Record::GetValues(GetValues::default()),
-        );
-        round_trip(
-            [Record::GetValues(
-                GetValues::default().add("FCGI_MAX_CONNS"),
-            )],
-            Record::GetValues(GetValues::default().add("FCGI_MAX_CONNS")),
+            [GetValues::default().add("FCGI_MAX_CONNS")],
+            GetValues::default().add("FCGI_MAX_CONNS"),
         );
     }
 
     #[test]
     fn get_values_result() {
-        round_trip(
-            [Record::GetValuesResult(GetValuesResult::default())],
-            Record::GetValuesResult(GetValuesResult::default()),
-        );
+        round_trip([GetValuesResult::default()], GetValuesResult::default());
 
         round_trip(
-            [Record::GetValuesResult(
-                GetValuesResult::default().add("FCGI_MAX_REQS", "1"),
-            )],
-            Record::GetValuesResult(GetValuesResult::default().add("FCGI_MAX_REQS", "1")),
+            [GetValuesResult::default().add("FCGI_MAX_REQS", "1")],
+            GetValuesResult::default().add("FCGI_MAX_REQS", "1"),
         );
     }
 
     #[test]
     fn unknown_type() {
-        round_trip(
-            [Record::UnknownType(UnknownType::new(100))],
-            Record::UnknownType(UnknownType::new(100)),
-        );
+        round_trip([UnknownType::new(100)], UnknownType::new(100));
     }
 
     #[test]
     fn begin_request() {
         round_trip(
-            [Record::BeginRequest(BeginRequest::new(
-                Role::Responder,
-                true,
-            ))],
-            Record::BeginRequest(BeginRequest::new(Role::Responder, true)),
+            [BeginRequest::new(Role::Responder, true)],
+            BeginRequest::new(Role::Responder, true),
         );
     }
 
     #[test]
     fn params() {
-        round_trip(
-            [Record::Params(Params::default())],
-            Record::Params(Params::default()),
-        );
+        round_trip([Params::default()], Params::default());
 
         round_trip(
-            [
-                Record::Params(Params::default().add("PATH", "/home")),
-                Record::Params(Params::default()),
-            ],
-            Record::Params(Params::default().add("PATH", "/home")),
+            [Params::default().add("PATH", "/home"), Params::default()],
+            Params::default().add("PATH", "/home"),
         );
     }
 
     #[test]
     fn stdin() {
-        round_trip(
-            [Record::Stdin(Stdin::new(vec![]))],
-            Record::Stdin(Stdin::new(vec![])),
-        );
+        round_trip([Stdin::new(vec![])], Stdin::new(vec![]));
 
         round_trip(
             [
-                Record::Stdin(Stdin::new(b"HELLO".into())),
-                Record::Stdin(Stdin::new(b"WORLD".into())),
-                Record::Stdin(Stdin::new(vec![])),
+                Stdin::new(b"HELLO".into()),
+                Stdin::new(b"WORLD".into()),
+                Stdin::new(vec![]),
             ],
-            Record::Stdin(Stdin::new(b"HELLOWORLD".into())),
+            Stdin::new(b"HELLOWORLD".into()),
         );
     }
 
     #[test]
     fn stdout() {
-        round_trip(
-            [Record::Stdout(Stdout::new(vec![]))],
-            Record::Stdout(Stdout::new(vec![])),
-        );
+        round_trip([Stdout::new(vec![])], Stdout::new(vec![]));
 
         round_trip(
             [
-                Record::Stdout(Stdout::new(b"HELLO".into())),
-                Record::Stdout(Stdout::new(b"WORLD".into())),
-                Record::Stdout(Stdout::new(vec![])),
+                Stdout::new(b"HELLO".into()),
+                Stdout::new(b"WORLD".into()),
+                Stdout::new(vec![]),
             ],
             Record::Stdout(Stdout::new(b"HELLOWORLD".into())),
         );
@@ -335,62 +313,47 @@ mod round_trip_tests {
 
     #[test]
     fn stderr() {
-        round_trip(
-            [Record::Stderr(Stderr::new(vec![]))],
-            Record::Stderr(Stderr::new(vec![])),
-        );
+        round_trip([Stderr::new(vec![])], Stderr::new(vec![]));
 
         round_trip(
             [
-                Record::Stderr(Stderr::new(b"HELLO".into())),
-                Record::Stderr(Stderr::new(b"WORLD".into())),
-                Record::Stderr(Stderr::new(vec![])),
+                Stderr::new(b"HELLO".into()),
+                Stderr::new(b"WORLD".into()),
+                Stderr::new(vec![]),
             ],
-            Record::Stderr(Stderr::new(b"HELLOWORLD".into())),
+            Stderr::new(b"HELLOWORLD".into()),
         );
     }
 
     #[test]
     fn data() {
-        round_trip(
-            [Record::Data(Data::new(vec![]))],
-            Record::Data(Data::new(vec![])),
-        );
+        round_trip([Data::new(vec![])], Data::new(vec![]));
 
         round_trip(
             [
-                Record::Data(Data::new(b"HELLO".into())),
-                Record::Data(Data::new(b"WORLD".into())),
-                Record::Data(Data::new(vec![])),
+                Data::new(b"HELLO".into()),
+                Data::new(b"WORLD".into()),
+                Data::new(vec![]),
             ],
-            Record::Data(Data::new(b"HELLOWORLD".into())),
+            Data::new(b"HELLOWORLD".into()),
         );
     }
 
     #[test]
     fn abort_request() {
-        round_trip(
-            [Record::AbortRequest(AbortRequest)],
-            Record::AbortRequest(AbortRequest),
-        );
+        round_trip([AbortRequest], AbortRequest);
     }
 
     #[test]
     fn end_request() {
         round_trip(
-            [Record::EndRequest(EndRequest::new(
-                0,
-                ProtocolStatus::RequestComplete,
-            ))],
-            Record::EndRequest(EndRequest::new(0, ProtocolStatus::RequestComplete)),
+            [EndRequest::new(0, ProtocolStatus::RequestComplete)],
+            EndRequest::new(0, ProtocolStatus::RequestComplete),
         );
 
         round_trip(
-            [Record::EndRequest(EndRequest::new(
-                1,
-                ProtocolStatus::UnknownRole,
-            ))],
-            Record::EndRequest(EndRequest::new(1, ProtocolStatus::UnknownRole)),
+            [EndRequest::new(1, ProtocolStatus::UnknownRole)],
+            EndRequest::new(1, ProtocolStatus::UnknownRole),
         );
     }
 }

@@ -88,7 +88,10 @@ impl Record {
     }
 
     pub fn is_management_record(&self) -> bool {
-            matches!(self, Self::GetValues(_) | Self::GetValuesResult(_) | Self::UnknownType(_))
+        matches!(
+            self,
+            Self::GetValues(_) | Self::GetValuesResult(_) | Self::UnknownType(_)
+        )
     }
 
     pub fn from_bytes(type_id: u8, payload: Vec<u8>) -> Result<Self, Error> {
@@ -126,4 +129,31 @@ impl Record {
             Self::UnknownType(r) => r.write_record_bytes(writer),
         }
     }
+}
+
+// These just make it easier to work with the inner record types
+macro_rules!  from_impls {
+    ($($t:ident),*) => {
+        $(
+            impl From<$t> for Record {
+                fn from(value: $t) -> Self {
+                    Record::$t(value)
+                }
+            }
+        )*
+    }
+}
+
+from_impls! {
+    GetValues,
+    GetValuesResult,
+    BeginRequest,
+    Params,
+    Stdin,
+    Stdout,
+    Stderr,
+    Data,
+    AbortRequest,
+    EndRequest,
+    UnknownType
 }

@@ -2,20 +2,17 @@
 
 Let's take it back to the 1990s. This library implements a multi-threaded server that speaks the [FastCGI protocol](https://www.mit.edu/~yandros/doc/specs/fcgi-spec.html).
 
-> [!WARNING]
-> Still a work in progress.
+## Useful terminology: 
 
-> [!NOTE]
-> Useful terminology: 
-> - CGI: A specification HTTP web servers can follow to execute a program in response to HTTP requests.
->   For example, you would configure your web server (e.g. Apache) to execute a certain bash script when a request came in.
->   The bash script would get access to request metadata via environment variables.
-> - FastCGI: A successor to CGI (Common Gateway Interface). Unlike CGI, programs are not executed every time a request comes in.
->   Instead, a FastCGI application is started and listens on a socket, and the HTTP web server communicates HTTP request metadata via that socket.
->   The FastCGI spec is a definition of the binary protocol used to communicate on that socket.
-> - FastCGI client: The program that initiates a FastCGI connection.
->   In most cases, this is the HTTP web server; it receives an HTTP request from a browser, and forwards that request to the FastCGI server.
-> - FastCGI server: A program that listens on a socket, and responds to requests from a FastCGI client.
+- CGI: A specification HTTP web servers can follow to execute a program in response to HTTP requests.
+  For example, you would configure your web server (e.g. Apache) to execute a certain bash script when a request came in.
+  The bash script would get access to request metadata via environment variables.
+- FastCGI: A successor to CGI (Common Gateway Interface). Unlike CGI, programs are not executed every time a request comes in.
+  Instead, a FastCGI application is started and listens on a socket, and the HTTP web server communicates HTTP request metadata via that socket.
+  The FastCGI spec is a definition of the binary protocol used to communicate on that socket.
+- FastCGI client: The program that initiates a FastCGI connection.
+  In most cases, this is the HTTP web server; it receives an HTTP request from a browser, and forwards that request to the FastCGI server.
+- FastCGI server: A program that listens on a socket, and responds to requests from a FastCGI client.
 
 ## Try it out!
 
@@ -28,7 +25,7 @@ Pick one.
 1. Download either [Nginx](https://nginx.org/) or [Caddy](https://caddyserver.com/)
 2. Configure the web server to reverse proxy fastcgi:
    1. If you picked caddy, stick this in a file in the current directory called `Caddyfile`:
-      ```text
+      ```
        localhost {
          reverse_proxy localhost:8000 {
            transport fastcgi
@@ -37,7 +34,7 @@ Pick one.
       ```
 
    2. If you picked nginx, stick this in a file in the current directory called `nginx.conf`:
-      ```text
+      ```
        events { }
        http {
          server {
