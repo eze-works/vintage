@@ -57,7 +57,9 @@
 //!       OpenMarket's archived
 //!       [manual](https://fastcgi-archives.github.io/fcgi2/doc/fastcgi-prog-guide/ch1intro.htm)
 //!       has more info.
-//!
+//! - Writing a "stderr" record is not supported. As far as I can tell, it's pretty useless.
+//!   At best, what you send in that record gets printed in the logs of the FastCGI _client_.
+//!   At worst, it gets ignored.
 
 #![allow(dead_code)]
 mod connection;
