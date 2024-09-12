@@ -1,30 +1,10 @@
-use vintage::{Request, Response};
-
-fn handler1(mut request: Request) -> Response {
-    dbg!(&request);
-    Response::html("<h1>Hello World</h1>")
-}
-
-fn handler2(mut request: Request) -> Response {
-    dbg!(&request);
-    Response::redirect("/")
-}
-
-fn handler3(mut request: Request) -> Response {
-    dbg!(&request);
-    Response::redirect("/two")
-}
+use vintage::{start, Response};
 
 fn main() {
-    env_logger::init();
-    let server1 = vintage::start("localhost:8000", handler1).unwrap();
-    let server2 = vintage::start("localhost:8001", handler2).unwrap();
-    let server3 = vintage::start("localhost:8002", handler3).unwrap();
+    let server = start("localhost:8000", |_request| {
+        Response::html("<h1>Hello World</h1>")
+    })
+    .unwrap();
 
-    println!("ALL SERVERS STARTED");
-
-    let msg = server1.join();
-    dbg!(msg);
-    server2.join();
-    server3.join();
+    server.join();
 }
