@@ -54,6 +54,8 @@ pub(super) const DISCRETE_RECORD_TYPES: [u8; 6] = [
 pub(super) const MANAGEMENT_RECORD_TYPES: [u8; 3] =
     [FCGI_GET_VALUES, FCGI_GET_VALUES_RESULT, FCGI_UNKNOWN_TYPE];
 
+
+
 /// A single FastCGI message
 ///
 /// All data that flows between FastCGI client and server is carried in records. The variant used

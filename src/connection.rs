@@ -220,17 +220,14 @@ pub(crate) use impl_expect;
 mod round_trip_tests {
     use super::*;
 
-    fn init_connection() -> Connection {
-        Connection::Test(VecDeque::new())
-    }
-
     // Test that records can be serialized and deserialized without loosing information.
     //
     // Some records are "stream" records, so this function allows sending a sequence of records and
     // asserting that they come out on the "other side" stiched together into one record
     #[track_caller]
     fn round_trip<T: IntoIterator<Item = Record>>(send: T, receive: Record) {
-        let mut connection = init_connection();
+        let mut connection = Connection::Test(VecDeque::new());
+
         for r in send.into_iter() {
             connection.write_record(&r).unwrap();
         }
@@ -241,108 +238,162 @@ mod round_trip_tests {
     #[test]
     fn get_values() {
         let vars: [&str; 0] = [];
-        let r1 = Record::GetValues(GetValues::new(vars));
-        let r2 = Record::GetValues(GetValues::new(["FCGI_MAX_CONNS"]));
-        round_trip([r1.clone()], r1);
-        round_trip([r2.clone()], r2);
+        round_trip(
+            [Record::GetValues(GetValues::new(vars))],
+            Record::GetValues(GetValues::new(vars)),
+        );
+        round_trip(
+            [Record::GetValues(GetValues::new(["FCGI_MAX_CONNS"]))],
+            Record::GetValues(GetValues::new(["FCGI_MAX_CONNS"])),
+        );
     }
 
     #[test]
     fn get_values_result() {
         let empty: [(&str, &str); 0] = [];
-        let r1 = Record::GetValuesResult(GetValuesResult::new(empty));
-        let r2 = Record::GetValuesResult(GetValuesResult::new([("FCGI_MAX_REQS", "1")]));
-        round_trip([r1.clone()], r1);
-        round_trip([r2.clone()], r2);
+        round_trip(
+            [Record::GetValuesResult(GetValuesResult::new(empty))],
+            Record::GetValuesResult(GetValuesResult::new(empty)),
+        );
+
+        round_trip(
+            [Record::GetValuesResult(GetValuesResult::new([(
+                "FCGI_MAX_REQS",
+                "1",
+            )]))],
+            Record::GetValuesResult(GetValuesResult::new([("FCGI_MAX_REQS", "1")])),
+        );
     }
 
     #[test]
     fn unknown_type() {
-        let r = Record::UnknownType(UnknownType::new(100));
-        round_trip([r.clone()], r);
+        round_trip(
+            [Record::UnknownType(UnknownType::new(100))],
+            Record::UnknownType(UnknownType::new(100)),
+        );
     }
 
     #[test]
     fn begin_request() {
-        let r = Record::BeginRequest(BeginRequest::new(Role::Responder, true));
-        round_trip([r.clone()], r);
+        round_trip(
+            [Record::BeginRequest(BeginRequest::new(
+                Role::Responder,
+                true,
+            ))],
+            Record::BeginRequest(BeginRequest::new(Role::Responder, true)),
+        );
     }
 
     #[test]
     fn params() {
         let empty: [(&str, &str); 0] = [];
-        let r1 = Record::Params(Params::new(empty));
-        round_trip([r1.clone()], r1);
 
-        let r2 = Record::Params(Params::new([("PATH", "/home")]));
-        let end = Record::Params(Params::new(empty));
-        round_trip([r2.clone(), end], r2);
+        round_trip(
+            [Record::Params(Params::new(empty))],
+            Record::Params(Params::new(empty)),
+        );
+
+        round_trip(
+            [
+                Record::Params(Params::new([("PATH", "/home")])),
+                Record::Params(Params::new(empty)),
+            ],
+            Record::Params(Params::new([("PATH", "/home")])),
+        );
     }
 
     #[test]
     fn stdin() {
-        let r1 = Record::Stdin(Stdin::new(vec![]));
-        round_trip([r1.clone()], r1);
+        round_trip(
+            [Record::Stdin(Stdin::new(vec![]))],
+            Record::Stdin(Stdin::new(vec![])),
+        );
 
-        let r2 = Record::Stdin(Stdin::new(b"HELLO".into()));
-        let r3 = Record::Stdin(Stdin::new(b"WORLD".into()));
-        let end = Record::Stdin(Stdin::new(vec![]));
-        let expected = Record::Stdin(Stdin::new(b"HELLOWORLD".into()));
-
-        round_trip([r2, r3, end], expected);
+        round_trip(
+            [
+                Record::Stdin(Stdin::new(b"HELLO".into())),
+                Record::Stdin(Stdin::new(b"WORLD".into())),
+                Record::Stdin(Stdin::new(vec![])),
+            ],
+            Record::Stdin(Stdin::new(b"HELLOWORLD".into())),
+        );
     }
 
     #[test]
     fn stdout() {
-        let r1 = Record::Stdout(Stdout::new(vec![]));
-        round_trip([r1.clone()], r1);
+        round_trip(
+            [Record::Stdout(Stdout::new(vec![]))],
+            Record::Stdout(Stdout::new(vec![])),
+        );
 
-        let r2 = Record::Stdout(Stdout::new(b"HELLO".into()));
-        let r3 = Record::Stdout(Stdout::new(b"WORLD".into()));
-        let end = Record::Stdout(Stdout::new(vec![]));
-        let expected = Record::Stdout(Stdout::new(b"HELLOWORLD".into()));
-
-        round_trip([r2, r3, end], expected);
+        round_trip(
+            [
+                Record::Stdout(Stdout::new(b"HELLO".into())),
+                Record::Stdout(Stdout::new(b"WORLD".into())),
+                Record::Stdout(Stdout::new(vec![])),
+            ],
+            Record::Stdout(Stdout::new(b"HELLOWORLD".into())),
+        );
     }
 
     #[test]
     fn stderr() {
-        let r1 = Record::Stderr(Stderr::new(vec![]));
-        round_trip([r1.clone()], r1);
+        round_trip(
+            [Record::Stderr(Stderr::new(vec![]))],
+            Record::Stderr(Stderr::new(vec![])),
+        );
 
-        let r2 = Record::Stderr(Stderr::new(b"HELLO".into()));
-        let r3 = Record::Stderr(Stderr::new(b"WORLD".into()));
-        let end = Record::Stderr(Stderr::new(vec![]));
-        let expected = Record::Stderr(Stderr::new(b"HELLOWORLD".into()));
-
-        round_trip([r2, r3, end], expected);
+        round_trip(
+            [
+                Record::Stderr(Stderr::new(b"HELLO".into())),
+                Record::Stderr(Stderr::new(b"WORLD".into())),
+                Record::Stderr(Stderr::new(vec![])),
+            ],
+            Record::Stderr(Stderr::new(b"HELLOWORLD".into())),
+        );
     }
 
     #[test]
     fn data() {
-        let r1 = Record::Data(Data::new(vec![]));
-        round_trip([r1.clone()], r1);
+        round_trip(
+            [Record::Data(Data::new(vec![]))],
+            Record::Data(Data::new(vec![])),
+        );
 
-        let r2 = Record::Data(Data::new(b"HELLO".into()));
-        let r3 = Record::Data(Data::new(b"WORLD".into()));
-        let end = Record::Data(Data::new(vec![]));
-        let expected = Record::Data(Data::new(b"HELLOWORLD".into()));
-
-        round_trip([r2, r3, end], expected);
+        round_trip(
+            [
+                Record::Data(Data::new(b"HELLO".into())),
+                Record::Data(Data::new(b"WORLD".into())),
+                Record::Data(Data::new(vec![])),
+            ],
+            Record::Data(Data::new(b"HELLOWORLD".into())),
+        );
     }
 
     #[test]
     fn abort_request() {
-        let r = Record::AbortRequest(AbortRequest);
-        round_trip([r.clone()], r);
+        round_trip(
+            [Record::AbortRequest(AbortRequest)],
+            Record::AbortRequest(AbortRequest),
+        );
     }
 
     #[test]
     fn end_request() {
-        let r1 = Record::EndRequest(EndRequest::new(0, ProtocolStatus::RequestComplete));
-        round_trip([r1.clone()], r1);
+        round_trip(
+            [Record::EndRequest(EndRequest::new(
+                0,
+                ProtocolStatus::RequestComplete,
+            ))],
+            Record::EndRequest(EndRequest::new(0, ProtocolStatus::RequestComplete)),
+        );
 
-        let r2 = Record::EndRequest(EndRequest::new(1, ProtocolStatus::UnknownRole));
-        round_trip([r2.clone()], r2);
+        round_trip(
+            [Record::EndRequest(EndRequest::new(
+                1,
+                ProtocolStatus::UnknownRole,
+            ))],
+            Record::EndRequest(EndRequest::new(1, ProtocolStatus::UnknownRole)),
+        );
     }
 }

@@ -21,9 +21,9 @@ impl Params {
     pub fn new<I, T>(pairs: I) -> Self
     where
         I: IntoIterator<Item = (T, T)>,
-        T: Into<String>,
+        T: std::fmt::Display,
     {
-        let pairs = BTreeMap::from_iter(pairs.into_iter().map(|(n, v)| (n.into(), v.into())));
+        let pairs = BTreeMap::from_iter(pairs.into_iter().map(|(n, v)| (n.to_string(), v.to_string())));
         Self(pairs)
     }
 
