@@ -1,24 +1,14 @@
 use crate::error::Error;
 use crate::record::{self, *};
 use bufstream::BufStream;
-use mio::event::Events;
-use mio::net::{TcpStream, UnixStream};
-use mio::{Interest, Poll, Token, Waker};
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::os::fd::IntoRawFd;
-
-const CONNECTION: Token = Token(0);
+use std::net::TcpStream;
 
 #[derive(Debug)]
 pub enum Connection {
-    Tcp {
-        poll: Poll,
-        events: Events,
-        stream: BufStream<TcpStream>,
-    },
-    UnixSocket(BufStream<UnixStream>),
+    Tcp(BufStream<TcpStream>),
     #[cfg(test)]
     Test(VecDeque<u8>),
 }
@@ -26,29 +16,7 @@ pub enum Connection {
 impl Write for Connection {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp {
-                poll,
-                events,
-                stream,
-            } => loop {
-                poll.poll(events, None)?;
-                for event in events.iter() {
-                    match event.token() {
-                        CONNECTION if event.is_writable() => loop {
-                            match stream.write(buf) {
-                                Ok(r) => return Ok(r),
-                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                                Err(e) => return Err(e),
-                            }
-                        },
-                        CONNECTION => {}
-                        _ => unreachable!(
-                            "only the connection should have been registered with poll"
-                        ),
-                    }
-                }
-            },
-            Connection::UnixSocket(w) => w.write(buf),
+            Connection::Tcp(w) => w.write(buf),
             #[cfg(test)]
             Connection::Test(w) => w.write(buf),
         }
@@ -56,29 +24,7 @@ impl Write for Connection {
 
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
-            Connection::Tcp {
-                poll,
-                events,
-                stream,
-            } => loop {
-                poll.poll(events, None)?;
-                for event in events.iter() {
-                    match event.token() {
-                        CONNECTION if event.is_writable() => loop {
-                            match stream.flush() {
-                                Ok(r) => return Ok(r),
-                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                                Err(e) => return Err(e),
-                            }
-                        },
-                        CONNECTION => {}
-                        _ => unreachable!(
-                            "only the connection should have been registered with poll"
-                        ),
-                    }
-                }
-            },
-            Connection::UnixSocket(w) => w.flush(),
+            Connection::Tcp(w) => w.flush(),
             #[cfg(test)]
             Connection::Test(w) => w.flush(),
         }
@@ -88,58 +34,26 @@ impl Write for Connection {
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp {
-                poll,
-                events,
-                stream,
-            } => loop {
-                poll.poll( events, None)?;
-                for event in events.iter() {
-                    match event.token() {
-                        CONNECTION if event.is_readable() => loop {
-                            match stream.read(buf) {
-                                Ok(r) => return Ok(r),
-                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                                Err(e) => return Err(e),
-                            }
-                        },
-                        CONNECTION => {}
-                        _ => unreachable!(
-                            "only the connection should have been registered with poll"
-                        ),
-                    }
-                }
-            },
-            Connection::UnixSocket(r) => r.read(buf),
+            Connection::Tcp(r) => r.read(buf),
             #[cfg(test)]
             Connection::Test(r) => r.read(buf),
         }
     }
 }
 
-impl TryFrom<TcpStream> for Connection {
+impl TryFrom<mio::net::TcpStream> for Connection {
     type Error = io::Error;
 
-    fn try_from(mut value: TcpStream) -> Result<Self, Self::Error> {
-        let poll = Poll::new()?;
-        let events = Events::with_capacity(128);
-        poll.registry().register(
-            &mut value,
-            CONNECTION,
-            Interest::READABLE | Interest::WRITABLE,
-        )?;
-
-        Ok(Connection::Tcp {
-            poll,
-            events,
-            stream: BufStream::new(value),
-        })
-    }
-}
-
-impl From<UnixStream> for Connection {
-    fn from(value: UnixStream) -> Self {
-        Connection::UnixSocket(BufStream::new(value))
+    fn try_from(value: mio::net::TcpStream) -> Result<Self, Self::Error> {
+        // Convert to a regular blocking TcpStream here, since it would be annoying to manage a mio
+        // event loop for every call to read/write/flush
+        // Additionally add a timeout for io operations so that an idle connection is not kept open
+        // indefinitely
+        let stream = TcpStream::from(value);
+        stream.set_nonblocking(false)?;
+        let timeout = std::time::Duration::from_secs(3);
+        stream.set_read_timeout(Some(timeout))?;
+        Ok(Connection::Tcp(BufStream::new(stream)))
     }
 }
 

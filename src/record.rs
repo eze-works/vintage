@@ -105,7 +105,7 @@ impl Record {
             FCGI_ABORT_REQUEST => Record::AbortRequest(AbortRequest::from_record_bytes(payload)?),
             FCGI_END_REQUEST => Record::EndRequest(EndRequest::from_record_bytes(payload)?),
             FCGI_UNKNOWN_TYPE => Record::UnknownType(UnknownType::from_record_bytes(payload)?),
-            _ => return Err(Error::UnknownRecordType(type_id))
+            _ => return Err(Error::UnknownRecordType(type_id)),
         };
 
         Ok(record)

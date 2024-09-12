@@ -50,22 +50,9 @@ Pick one.
 5. Run `cargo run`
 6. Visit `http://localhost` on your browser!
   
-
-## Why?
-
-- I've been waiting for an excuse to use thread pools.
-- The common setup of having an HTTP Web Server like nginx or caddy reverse-proxying to _another_ internal HTTP server feels a bit silly:
-  Why are there two programs re-parsing HTTP?
-- To rage against the rust async server monoculture and pave my own way ✊.
-
-
 ## Similar libraries
 
 - [fastcgi](https://crates.io/crates/fastcgi)
 - [tokio-fastcgi](https://crates.io/crates/tokio-fastcgi)
 - [fastcgi-server](https://github.com/TheJokr/fastcgi-server)
-
-
-[^1]: The only solid one I know of is [rouille](https://crates.io/crates/rouille) but that has not been updated in a while, and now has compilation warnings, which don't spark joy :/
-      Yes, those compilation warnings are the only reason I sought an alternative.
 

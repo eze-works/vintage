@@ -35,12 +35,6 @@ pub enum ServerExitReason {
     Panic(String),
 }
 
-impl From<io::Error> for ServerExitReason {
-    fn from(value: io::Error) -> Self {
-        ServerExitReason::Err(value)
-    }
-}
-
 struct Server<F> {
     socket: TcpListener,
     handler: Arc<F>,
@@ -204,7 +198,7 @@ where
                             Ok((stream, _)) => {
                                 let connection = match Connection::try_from(stream) {
                                     Ok(c) => c,
-                                    Err(err) => return ServerExitReason::from(err),
+                                    Err(err) => return ServerExitReason::Err(err),
                                 };
                                 let handler = self.handler.clone();
                                 pool.execute(move || {
@@ -258,7 +252,6 @@ where
         let first_record = match conn.read_record() {
             Ok(r) => r,
             Err(e) => {
-                dbg!(&e);
                 return Self::handle_error(&mut conn, e);
             }
         };
@@ -311,17 +304,8 @@ where
         let _ = response.write_stdout_bytes(&mut stdout.0);
         let _ = conn.write_record(&Record::Stdout(stdout));
 
-        let exit_code = if response.get_error().is_some() {
-            let mut stderr = Stderr(vec![]);
-            let _ = response.write_stderr_bytes(&mut stderr.0);
-            let _ = conn.write_record(&Record::Stderr(stderr));
-            1
-        } else {
-            0
-        };
-
         let _ = conn.write_record(&Record::EndRequest(EndRequest::new(
-            exit_code,
+            0,
             ProtocolStatus::RequestComplete,
         )));
     }
@@ -350,28 +334,27 @@ where
     }
 
     fn respond_with_values(conn: &mut Connection, record: GetValues) {
+        let mut response = GetValuesResult::default();
         for variable in record.get_variables() {
             // If the client cares, tell it we do not want to multiplex connections
             if variable == "FCGI_MPXS_CONNS" {
-                let response = GetValuesResult::default().add("FCGI_MPXS_CONNS", "0");
-                let _ = conn.write_record(&Record::GetValuesResult(response));
+                response = response.add("FCGI_MPXS_CONNS", "0");
                 break;
             }
         }
+        let _ = conn.write_record(&Record::GetValuesResult(response));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connection::Packet;
     use assert_matches::assert_matches;
-    use bufstream::BufStream;
     use mio::net::TcpStream;
-    use std::str::FromStr;
 
     macro_rules! records {
         ($($record:expr),* $(,)?) => {{
+            #[allow(unused_mut)]
             let mut records: Vec<Record> = vec![];
             $(
                 records.push($record.into());
@@ -410,6 +393,17 @@ mod tests {
     #[test]
     fn get_values() {
         let server = start("localhost:0", |_| Response::text("hello")).unwrap();
+
+        assert_request(
+            server.address(),
+            records! {
+                GetValues::default(),
+            },
+            records! {
+                GetValuesResult::default(),
+            },
+        );
+
         assert_request(
             server.address(),
             records! {
@@ -422,37 +416,41 @@ mod tests {
     }
 
     #[test]
-    fn unknown_record_type() {
-        let server = start("localhost:0", |_| Response::text("hello")).unwrap();
-        let s = TcpStream::connect(server.address()).unwrap();
-        let mut connection = Connection::try_from(s).unwrap();
-        let bad_packet = Packet {
-            type_id: 255,
-            content: vec![],
-        };
-        connection.write_packet(&bad_packet);
+    fn unsupported_keepalive() {
+        let server = start("localhost:0", |_| Response::default()).unwrap();
 
         assert_request(
             server.address(),
-            records! {},
             records! {
-                UnknownType(255)
+                BeginRequest::new(Role::Responder, true),
+                Params::default(),
+                Stdin(vec![])
+            },
+            records! {
+                EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported)
             },
         );
     }
 
     #[test]
-    fn doserver() {
-        let server = start("localhost:0", |_| Response::text("hello")).unwrap();
+    fn successful_responder_flow() {
+        // A server that responds with concatenating the PARAM metavariable with the body
+        let server = start("localhost:0", |mut req| {
+            let body = String::from_utf8(req.read_body()).unwrap();
+            let param = req.get("PARAM").unwrap();
+            Response::text(format!("{param}:{body}"))
+        })
+        .unwrap();
+
         assert_request(
             server.address(),
             records! {
                 BeginRequest::new(Role::Responder, false),
-                Params::default(),
-                Stdin(vec![])
+                Params::default().add("PARAM", "FOO"),
+                Stdin(b"BAR".to_vec())
             },
             records! {
-                Stdout(b"Content-Type: text/plain\nStatus: 200\n\nhello".to_vec()),
+                Stdout(b"Content-Type: text/plain\nStatus: 200\n\nFOO:BAR".to_vec()),
                 EndRequest::new(0, ProtocolStatus::RequestComplete)
             },
         );

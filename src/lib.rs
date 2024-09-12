@@ -46,15 +46,17 @@
 //! - I ignore the part about what file descriptors are open when the FastCGI server begins (Section 2.2)
 //! - I ignore the special processing of the magic `FCGI_WEB_SERVER_ADDRS` environment variable (Section 3.2)
 //! - `FCGI_UNKNOWN_TYPE` is sent for any unknown record type, instead of just unknown management
-//! record types (Section 4.2).
+//!   record types (Section 4.2).
 //! - Only the Responder role is implemented. Two reasons:
 //!   - Authorizer & Filter roles are not implemented by any current FastCGI-capable servers (or clients).
 //!     - I checked the source code of Nginx, Caddy and Php-fpm (arguabley the most popular fastcgi client).
 //!   - Authorizer & Filter are not relevant anymore.
 //!     - Authorization is usually part of the application.
-//!     - The Filter is too niche to be useful. It assumes your request path has an extension. The
-//!     spec is actually light on details regarding its use. OpenMarket's archived [manual](https://fastcgi-archives.github.io/fcgi2/doc/fastcgi-prog-guide/ch1intro.htm) has more
-//!     info.
+//!     - The Filter is too niche to be useful. It assumes your request path has an extension.
+//!       The spec is actually light on details regarding its use.
+//!       OpenMarket's archived
+//!       [manual](https://fastcgi-archives.github.io/fcgi2/doc/fastcgi-prog-guide/ch1intro.htm)
+//!       has more info.
 //!
 
 #![allow(dead_code)]
@@ -64,7 +66,6 @@ mod record;
 mod request;
 mod response;
 mod server;
-mod poller;
 
 pub use request::Request;
 pub use response::Response;
