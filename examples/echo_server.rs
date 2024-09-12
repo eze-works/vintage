@@ -23,9 +23,8 @@ fn main() {
 
     println!("ALL SERVERS STARTED");
 
-    loop {}
-
-    // server1.stop();
-    // server2.stop();
-    // server3.stop();
+    let msg = server1.join();
+    dbg!(msg);
+    server2.join();
+    server3.join();
 }

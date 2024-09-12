@@ -10,15 +10,28 @@ use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
-use std::thread;
+use std::thread::{spawn, JoinHandle};
 
 // TODO: Logger library
 // Log everywhere you ignore errors.
 
 /// Handle to a running FastCGI server
 pub struct ServerHandle {
+    server_loop: JoinHandle<ServerExitReason>,
     server_waker: Waker,
     observe_shutdown: Receiver<()>,
+}
+
+/// The reason the server exited
+#[derive(Debug, Default)]
+pub enum ServerExitReason {
+    /// It was gracefully shutdown shutdown
+    #[default]
+    Normal,
+    /// Polling the server socket for new connections failed somehow.
+    Err(io::Error),
+    /// The server panicked. The payload will contain the panic message.
+    Panic(String),
 }
 
 struct Server<F> {
@@ -98,17 +111,34 @@ where
         signal_shutdown,
     };
 
-    thread::spawn(move || {
-        let _ = server.server_loop();
-    });
+    let handle = spawn(move || server.server_loop());
 
     Ok(ServerHandle {
+        server_loop: handle,
         server_waker,
         observe_shutdown,
     })
 }
 
 impl ServerHandle {
+    /// Blocks until the server terminates and returns the reason.
+    ///
+    /// This function does not attempt to stop the server. It waits (potentially indefinitely)
+    /// until it exits. If you want to stop sthe server, use
+    /// [`stop()`](crate::ServerHandle::stop).
+    pub fn join(self) -> ServerExitReason {
+        match self.server_loop.join() {
+            Ok(r) => r,
+            Err(any) => match any.as_ref().downcast_ref::<String>() {
+                Some(s) => ServerExitReason::Panic(s.clone()),
+                None => match any.as_ref().downcast_ref::<&str>() {
+                    Some(s) => ServerExitReason::Panic(s.to_string()),
+                    None => ServerExitReason::Panic(String::new()),
+                },
+            },
+        }
+    }
+
     /// Stops the FastCGI server
     ///
     /// The server waits for all in-flight requests to complete before it is shutdown
@@ -136,7 +166,7 @@ where
     F: 'static + Sync + Send,
     F: Fn(Request) -> Response,
 {
-    fn server_loop(mut self) -> Result<(), io::Error> {
+    fn server_loop(mut self) -> ServerExitReason {
         // `shutdown_threadpool` should always be called before exiting this function, regardless of
         // cause.
         // This will ensure active threads finish their work.
@@ -148,7 +178,7 @@ where
                 Err(err) => {
                     log::warn!(error:err = err; "Poll call failed. Server loop will exit");
                     Self::shutdown_threadpool(pool);
-                    return Err(err);
+                    return ServerExitReason::Err(err);
                 }
             };
 
@@ -167,7 +197,7 @@ where
                             Err(err) => {
                                 log::warn!(error:err = err; "Socket accept call failed. Server loop will exit");
                                 Self::shutdown_threadpool(pool);
-                                return Err(err);
+                                return ServerExitReason::Err(err);
                             }
                         }
                     },
@@ -188,7 +218,7 @@ where
                             );
                             unreachable!("failed to notify main thread of shutdown");
                         }
-                        return Ok(());
+                        return ServerExitReason::Normal;
                     }
                     _ => unreachable!(),
                 }

@@ -7,4 +7,4 @@ mod server;
 
 pub use request::Request;
 pub use response::Response;
-pub use server::{start, ServerHandle};
+pub use server::{start, ServerHandle, ServerExitReason};
