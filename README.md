@@ -2,7 +2,7 @@
 
 Let's take it back to the 1990s. This library implements a multi-threaded server that speaks the [FastCGI protocol](https://www.mit.edu/~yandros/doc/specs/fcgi-spec.html).
 
-[!NOTE]
+> [!NOTE]
 > Useful terminology: 
 > - CGI: A specification HTTP web servers can follow to execute a program in response to HTTP requests.
 >   For example, you would configure your web server (e.g. Apache) to execute a certain bash script when a request came in.
