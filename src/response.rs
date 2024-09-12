@@ -1,4 +1,3 @@
-use crate::record::Stdout;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::io::{self, Write};
@@ -12,8 +11,8 @@ pub struct Response {
 }
 
 impl Default for Response {
+    /// Creates an empty 200 OK response
     fn default() -> Self {
-        /// Creates an empty 200 OK response
         let default_headers = BTreeMap::from_iter([
             ("Status".into(), "200".into()),
             ("Content-Type".into(), "text/plain".into()),
@@ -93,10 +92,10 @@ impl Response {
             return Ok(());
         };
 
-        writeln!(writer, "{}", err.to_string())?;
+        writeln!(writer, "{}", err)?;
 
         for child_err in std::iter::successors(Some(err.as_ref()), |err| err.source()) {
-            writeln!(writer, "\t{}", child_err.to_string())?;
+            writeln!(writer, "\t{}", child_err)?;
         }
         Ok(())
     }

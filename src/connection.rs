@@ -219,7 +219,6 @@ pub(crate) use impl_expect;
 #[cfg(test)]
 mod round_trip_tests {
     use super::*;
-    use record::*;
 
     fn init_connection() -> Connection {
         Connection::Test(VecDeque::new())

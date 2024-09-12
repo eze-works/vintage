@@ -22,6 +22,7 @@ pub use get_values::GetValues;
 pub use get_values_result::GetValuesResult;
 pub use params::Params;
 pub use protocol_status::ProtocolStatus;
+#[cfg(test)]
 pub use role::Role;
 use std::io::{self, Write};
 pub use stderr::Stderr;

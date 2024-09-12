@@ -1,6 +1,6 @@
 use crate::record::{Params, Stdin};
 
-/// A request from a FastCGI client. 
+/// A request from a FastCGI client.
 ///
 /// Common [request metavariables](https://datatracker.ietf.org/doc/html/rfc3875#section-4.1) can be retrieved using the similarly named functions.
 /// These functions return `None` when the header has no value or if its value is the empty string.

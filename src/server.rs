@@ -6,7 +6,7 @@ use crate::response::Response;
 use mio::event::Events;
 use mio::net::TcpListener;
 use mio::{Interest, Poll, Token, Waker};
-use std::io::{self, Write};
+use std::io::{self};
 use std::net::ToSocketAddrs;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
@@ -203,7 +203,7 @@ where
                     },
                     SHUTDOWN => {
                         Self::shutdown_threadpool(pool);
-                        if let Err(err) = self.signal_shutdown.send(()) {
+                        if self.signal_shutdown.send(()).is_err() {
                             // The only way this happens is if the main thread called
                             // `Server::server_waker.wake()` then immediately dropped
                             // the `Server::observe_shutdown` receiver such that this fails to
@@ -292,7 +292,7 @@ where
         let _ = response.write_stdout_bytes(&mut stdout.0);
         let _ = conn.write_record(&Record::Stdout(stdout));
 
-        let exit_code = if let Some(_) = response.get_error() {
+        let exit_code = if response.get_error().is_some() {
             let mut stderr = Stderr(vec![]);
             let _ = response.write_stderr_bytes(&mut stderr.0);
             let _ = conn.write_record(&Record::Stderr(stderr));
