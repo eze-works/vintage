@@ -1,42 +1,86 @@
 use crate::error::Error;
 use crate::record::{self, *};
 use bufstream::BufStream;
+use mio::event::Events;
 use mio::net::{TcpStream, UnixStream};
+use mio::{Interest, Poll, Token, Waker};
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
+use std::os::fd::IntoRawFd;
+
+const CONNECTION: Token = Token(0);
 
 #[derive(Debug)]
 pub enum Connection {
-    Tcp(BufStream<TcpStream>),
+    Tcp {
+        poll: Poll,
+        events: Events,
+        stream: BufStream<TcpStream>,
+    },
     UnixSocket(BufStream<UnixStream>),
     #[cfg(test)]
     Test(VecDeque<u8>),
-    // The mio TcpStream is non-blocking, which would be annoying to test.
-    #[cfg(test)]
-    BlockingTcp(BufStream<std::net::TcpStream>),
 }
 
 impl Write for Connection {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp(w) => w.write(buf),
+            Connection::Tcp {
+                poll,
+                events,
+                stream,
+            } => loop {
+                poll.poll(events, None)?;
+                for event in events.iter() {
+                    match event.token() {
+                        CONNECTION if event.is_writable() => loop {
+                            match stream.write(buf) {
+                                Ok(r) => return Ok(r),
+                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                                Err(e) => return Err(e),
+                            }
+                        },
+                        CONNECTION => {}
+                        _ => unreachable!(
+                            "only the connection should have been registered with poll"
+                        ),
+                    }
+                }
+            },
             Connection::UnixSocket(w) => w.write(buf),
             #[cfg(test)]
             Connection::Test(w) => w.write(buf),
-            #[cfg(test)]
-            Connection::BlockingTcp(w) => w.write(buf),
         }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
-            Connection::Tcp(w) => w.flush(),
+            Connection::Tcp {
+                poll,
+                events,
+                stream,
+            } => loop {
+                poll.poll(events, None)?;
+                for event in events.iter() {
+                    match event.token() {
+                        CONNECTION if event.is_writable() => loop {
+                            match stream.flush() {
+                                Ok(r) => return Ok(r),
+                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                                Err(e) => return Err(e),
+                            }
+                        },
+                        CONNECTION => {}
+                        _ => unreachable!(
+                            "only the connection should have been registered with poll"
+                        ),
+                    }
+                }
+            },
             Connection::UnixSocket(w) => w.flush(),
             #[cfg(test)]
             Connection::Test(w) => w.flush(),
-            #[cfg(test)]
-            Connection::BlockingTcp(w) => w.flush(),
         }
     }
 }
@@ -44,32 +88,58 @@ impl Write for Connection {
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp(r) => r.read(buf),
+            Connection::Tcp {
+                poll,
+                events,
+                stream,
+            } => loop {
+                poll.poll( events, None)?;
+                for event in events.iter() {
+                    match event.token() {
+                        CONNECTION if event.is_readable() => loop {
+                            match stream.read(buf) {
+                                Ok(r) => return Ok(r),
+                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                                Err(e) => return Err(e),
+                            }
+                        },
+                        CONNECTION => {}
+                        _ => unreachable!(
+                            "only the connection should have been registered with poll"
+                        ),
+                    }
+                }
+            },
             Connection::UnixSocket(r) => r.read(buf),
             #[cfg(test)]
             Connection::Test(r) => r.read(buf),
-            #[cfg(test)]
-            Connection::BlockingTcp(r) => r.read(buf),
         }
     }
 }
 
-impl From<TcpStream> for Connection {
-    fn from(value: TcpStream) -> Self {
-        Connection::Tcp(BufStream::new(value))
+impl TryFrom<TcpStream> for Connection {
+    type Error = io::Error;
+
+    fn try_from(mut value: TcpStream) -> Result<Self, Self::Error> {
+        let poll = Poll::new()?;
+        let events = Events::with_capacity(128);
+        poll.registry().register(
+            &mut value,
+            CONNECTION,
+            Interest::READABLE | Interest::WRITABLE,
+        )?;
+
+        Ok(Connection::Tcp {
+            poll,
+            events,
+            stream: BufStream::new(value),
+        })
     }
 }
 
 impl From<UnixStream> for Connection {
     fn from(value: UnixStream) -> Self {
         Connection::UnixSocket(BufStream::new(value))
-    }
-}
-
-#[cfg(test)]
-impl From<std::net::TcpStream> for Connection {
-    fn from(value: std::net::TcpStream) -> Self {
-        Connection::BlockingTcp(BufStream::new(value))
     }
 }
 
@@ -83,9 +153,9 @@ impl From<std::net::TcpStream> for Connection {
 // + Packet: A single, and potentially incomplete physical message sent by a FastCGI client.
 // + Record: A logically complete FastCGI message. You might need multiple packets to assemble one.
 #[derive(Debug, Clone)]
-struct Packet {
-    type_id: u8,
-    content: Vec<u8>,
+pub struct Packet {
+    pub type_id: u8,
+    pub content: Vec<u8>,
 }
 
 impl Packet {
@@ -103,7 +173,7 @@ impl Packet {
 }
 
 impl Connection {
-    fn read_packet(&mut self) -> Result<Packet, Error> {
+    pub fn read_packet(&mut self) -> Result<Packet, Error> {
         let mut header = [0u8; 8];
         self.read_exact(&mut header)
             .map_err(Error::UnexpectedSocketClose)?;
@@ -132,7 +202,7 @@ impl Connection {
         Ok(Packet { type_id, content })
     }
 
-    fn write_packet(&mut self, packet: &Packet) -> Result<(), io::Error> {
+    pub fn write_packet(&mut self, packet: &Packet) -> Result<(), io::Error> {
         let payload = &packet.content;
 
         // Length of Header + Length of Payload
@@ -297,7 +367,7 @@ mod round_trip_tests {
 
     #[test]
     fn unknown_type() {
-        round_trip(UnknownType::new(100));
+        round_trip(UnknownType(100));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::io::{self, Write};
 /// this.
 /// Therefore, this library also emits this record type in response to unrecognized application records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnknownType(u8);
+pub struct UnknownType(pub u8);
 
 impl UnknownType {
     pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
@@ -23,9 +23,5 @@ impl UnknownType {
 
     pub fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&[self.0, 0, 0, 0, 0, 0, 0, 0])
-    }
-
-    pub fn new(type_id: u8) -> Self {
-        Self(type_id)
     }
 }

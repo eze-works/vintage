@@ -8,6 +8,9 @@ pub enum Error {
     #[error("Unsupported FastCGI version: '{0}'")]
     UnsuportedVersion(u8),
 
+    #[error("Unknown record type: '{0}'")]
+    UnknownRecordType(u8),
+
     #[error("Multiplexing multiple requests unto a single connection is not supported")]
     MultiplexingUnsupported,
 

@@ -7,7 +7,7 @@ use mio::event::Events;
 use mio::net::TcpListener;
 use mio::{Interest, Poll, Token, Waker};
 use std::io::{self};
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
@@ -17,6 +17,7 @@ use std::thread::{spawn, JoinHandle};
 
 /// Handle to a running FastCGI server
 pub struct ServerHandle {
+    address: SocketAddr,
     server_loop: JoinHandle<ServerExitReason>,
     server_waker: Waker,
     observe_shutdown: Receiver<()>,
@@ -32,6 +33,12 @@ pub enum ServerExitReason {
     Err(io::Error),
     /// The server panicked. The payload will contain the panic message.
     Panic(String),
+}
+
+impl From<io::Error> for ServerExitReason {
+    fn from(value: io::Error) -> Self {
+        ServerExitReason::Err(value)
+    }
 }
 
 struct Server<F> {
@@ -90,6 +97,8 @@ where
 
     let mut socket = TcpListener::bind(address)?;
 
+    let address = socket.local_addr()?;
+
     log::info!("FastCGI Server listening on {address}");
 
     let poll = Poll::new()?;
@@ -114,6 +123,7 @@ where
     let handle = spawn(move || server.server_loop());
 
     Ok(ServerHandle {
+        address,
         server_loop: handle,
         server_waker,
         observe_shutdown,
@@ -159,6 +169,11 @@ impl ServerHandle {
         // with an error. But we ignore it because we only care that the server loop is stopped.
         let _ = self.observe_shutdown.recv();
     }
+
+    /// Returns the address at which the server is currently listening
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
 }
 
 impl<F> Server<F>
@@ -187,7 +202,10 @@ where
                     SERVER => loop {
                         match self.socket.accept() {
                             Ok((stream, _)) => {
-                                let connection = Connection::from(stream);
+                                let connection = match Connection::try_from(stream) {
+                                    Ok(c) => c,
+                                    Err(err) => return ServerExitReason::from(err),
+                                };
                                 let handler = self.handler.clone();
                                 pool.execute(move || {
                                     Self::fast_cgi(connection, handler);
@@ -240,6 +258,7 @@ where
         let first_record = match conn.read_record() {
             Ok(r) => r,
             Err(e) => {
+                dbg!(&e);
                 return Self::handle_error(&mut conn, e);
             }
         };
@@ -310,15 +329,19 @@ where
     fn handle_error(conn: &mut Connection, e: Error) {
         match e {
             Error::UnsupportedRole(_) => {
-                let response = Record::EndRequest(EndRequest::new(0, ProtocolStatus::UnknownRole));
-                let _ = conn.write_record(&response);
+                let response = EndRequest::new(0, ProtocolStatus::UnknownRole);
+                let _ = conn.write_record(&response.into());
                 log::warn!("FastCGI client requested an unknown role. Closing connection");
             }
             Error::MultiplexingUnsupported => {
-                let response =
-                    Record::EndRequest(EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported));
-                let _ = conn.write_record(&response);
+                let response = EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported);
+                let _ = conn.write_record(&response.into());
                 log::warn!("FastCGI client requested connection multiplixing. It is not supported. Closing connection");
+            }
+            Error::UnknownRecordType(t) => {
+                let response = UnknownType(t);
+                let _ = conn.write_record(&response.into());
+                log::warn!("Unknown record type: {t}. Closing connection");
             }
             e => {
                 log::warn!(error:err = e; "Error reading FastCGI record. Closing connection");
@@ -341,11 +364,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connection::Packet;
     use assert_matches::assert_matches;
-    use std::net::TcpStream;
+    use bufstream::BufStream;
+    use mio::net::TcpStream;
+    use std::str::FromStr;
 
     macro_rules! records {
-        ($($record:expr),*) => {{
+        ($($record:expr),* $(,)?) => {{
             let mut records: Vec<Record> = vec![];
             $(
                 records.push($record.into());
@@ -354,13 +380,12 @@ mod tests {
         }}
     }
 
-    fn assert_request<A: ToSocketAddrs>(
-        address: A,
-        to_send: Vec<Record>,
-        mut expected: Vec<Record>,
-    ) {
+    // Test that when we send `to_send` records to the server at `address`, we get back the
+    // `expected` records
+    #[track_caller]
+    fn assert_request(address: SocketAddr, to_send: Vec<Record>, mut expected: Vec<Record>) {
         let socket = TcpStream::connect(address).unwrap();
-        let mut connection = Connection::from(socket);
+        let mut connection = Connection::try_from(socket).unwrap();
 
         for record in to_send.iter() {
             connection.write_record(record).unwrap();
@@ -383,12 +408,44 @@ mod tests {
     }
 
     #[test]
-    fn doserver() {
-        let address = "localhost:8000";
-        let _server = start(address, |_| Response::text("hello"));
+    fn get_values() {
+        let server = start("localhost:0", |_| Response::text("hello")).unwrap();
+        assert_request(
+            server.address(),
+            records! {
+                GetValues::default().add("FCGI_MPXS_CONNS").add("VALUE_WE_DONT_KNOW"),
+            },
+            records! {
+                GetValuesResult::default().add("FCGI_MPXS_CONNS", "0"),
+            },
+        );
+    }
+
+    #[test]
+    fn unknown_record_type() {
+        let server = start("localhost:0", |_| Response::text("hello")).unwrap();
+        let s = TcpStream::connect(server.address()).unwrap();
+        let mut connection = Connection::try_from(s).unwrap();
+        let bad_packet = Packet {
+            type_id: 255,
+            content: vec![],
+        };
+        connection.write_packet(&bad_packet);
 
         assert_request(
-            address,
+            server.address(),
+            records! {},
+            records! {
+                UnknownType(255)
+            },
+        );
+    }
+
+    #[test]
+    fn doserver() {
+        let server = start("localhost:0", |_| Response::text("hello")).unwrap();
+        assert_request(
+            server.address(),
             records! {
                 BeginRequest::new(Role::Responder, false),
                 Params::default(),
