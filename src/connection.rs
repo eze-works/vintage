@@ -12,6 +12,9 @@ pub enum Connection {
     UnixSocket(BufStream<UnixStream>),
     #[cfg(test)]
     Test(VecDeque<u8>),
+    // The mio TcpStream is non-blocking, which would be annoying to test.
+    #[cfg(test)]
+    BlockingTcp(BufStream<std::net::TcpStream>),
 }
 
 impl Write for Connection {
@@ -21,6 +24,8 @@ impl Write for Connection {
             Connection::UnixSocket(w) => w.write(buf),
             #[cfg(test)]
             Connection::Test(w) => w.write(buf),
+            #[cfg(test)]
+            Connection::BlockingTcp(w) => w.write(buf),
         }
     }
 
@@ -30,6 +35,8 @@ impl Write for Connection {
             Connection::UnixSocket(w) => w.flush(),
             #[cfg(test)]
             Connection::Test(w) => w.flush(),
+            #[cfg(test)]
+            Connection::BlockingTcp(w) => w.flush(),
         }
     }
 }
@@ -41,6 +48,8 @@ impl Read for Connection {
             Connection::UnixSocket(r) => r.read(buf),
             #[cfg(test)]
             Connection::Test(r) => r.read(buf),
+            #[cfg(test)]
+            Connection::BlockingTcp(r) => r.read(buf),
         }
     }
 }
@@ -54,6 +63,13 @@ impl From<TcpStream> for Connection {
 impl From<UnixStream> for Connection {
     fn from(value: UnixStream) -> Self {
         Connection::UnixSocket(BufStream::new(value))
+    }
+}
+
+#[cfg(test)]
+impl From<std::net::TcpStream> for Connection {
+    fn from(value: std::net::TcpStream) -> Self {
+        Connection::BlockingTcp(BufStream::new(value))
     }
 }
 
@@ -73,8 +89,12 @@ struct Packet {
 }
 
 impl Packet {
-    fn is_incomplete(&self) -> bool {
+    fn is_discrete(&self) -> bool {
         record::DISCRETE_RECORD_TYPES.contains(&self.type_id)
+    }
+
+    fn is_management_record(&self) -> bool {
+        record::MANAGEMENT_RECORD_TYPES.contains(&self.type_id)
     }
 
     fn is_empty(&self) -> bool {
@@ -112,11 +132,45 @@ impl Connection {
         Ok(Packet { type_id, content })
     }
 
+    fn write_packet(&mut self, packet: &Packet) -> Result<(), io::Error> {
+        let payload = &packet.content;
+
+        // Length of Header + Length of Payload
+        let unpadded_len = 8 + payload.len();
+
+        // Figure out the closest factor of 8 that is greater than the unpadded length
+        let padded_len = unpadded_len.div_ceil(8) * 8;
+
+        // The amount of padding is the difference between those numers
+        let padding = (padded_len - unpadded_len) as u8;
+
+        let request_id = if packet.is_management_record() {
+            [0, 0]
+        } else {
+            [0, 1]
+        };
+
+        // Version + Record type
+        self.write_all(&[1, packet.type_id])?;
+        // Request ID
+        self.write_all(&request_id)?;
+        // Payload length
+        self.write_all(&(payload.len() as u16).to_be_bytes())?;
+        // Padding length + Reserved field
+        self.write_all(&[padding, 0])?;
+        // Payload
+        self.write_all(payload)?;
+        // Padding
+        self.write_all(&vec![0u8; padding as usize])?;
+        // Don't forget to flush.
+        self.flush()
+    }
+
     pub fn read_record(&mut self) -> Result<Record, Error> {
         let first = self.read_packet()?;
         let expected_type_id = first.type_id;
 
-        if first.is_incomplete() || first.is_empty() {
+        if first.is_discrete() || first.is_empty() {
             let record = Record::from_bytes(expected_type_id, first.content)?;
             return Ok(record);
         }
@@ -147,39 +201,35 @@ impl Connection {
     }
 
     pub fn write_record(&mut self, record: &Record) -> Result<(), io::Error> {
-        // We need the payload length in order to figure out the length of the padding
         let mut payload = vec![];
         record.write_bytes(&mut payload)?;
 
-        // Length of Header + Length of Payload
-        let unpadded_len = 8 + payload.len();
+        // The length of the payload must be able to fit in two bytes.
+        let mut payload_chunks: Vec<Vec<_>> = payload
+            .chunks(u16::MAX as usize)
+            .map(<[u8]>::to_vec)
+            .collect();
 
-        // Figure out the closest factor of 8 that is greater than the unpadded length
-        let padded_len = unpadded_len.div_ceil(8) * 8;
+        // Always write an empty chunk.
+        // + For stream records, this will be used to terminate the stream
+        // + For empty discrete records, this will be the only chunk written
+        payload_chunks.push(vec![]);
 
-        // The amount of padding is the difference between those numers
-        let padding = (padded_len - unpadded_len) as u8;
+        for chunk in payload_chunks {
+            let packet = Packet {
+                type_id: record.type_id(),
+                content: chunk,
+            };
+            self.write_packet(&packet)?;
 
-        let request_id = if record.is_management_record() {
-            [0, 0]
-        } else {
-            [0, 1]
-        };
+            // Discrete records should always fit in a single packet. So write exactly one, and
+            // break out
+            if packet.is_discrete() {
+                break;
+            }
+        }
 
-        // Version + Record type
-        self.write_all(&[1, record.type_id()])?;
-        // Request ID (which is always 1)
-        self.write_all(&request_id)?;
-        // Payload length
-        self.write_all(&(payload.len() as u16).to_be_bytes())?;
-        // Padding length + Reserved field
-        self.write_all(&[padding, 0])?;
-        // Payload
-        self.write_all(&payload)?;
-        // Padding
-        self.write_all(&vec![0u8; padding as usize])?;
-        // Don't forget to flush.
-        self.flush()
+        Ok(())
     }
 
     impl_expect!(GetValues);
@@ -221,139 +271,141 @@ mod round_trip_tests {
     use super::*;
 
     // Test that records can be serialized and deserialized without loosing information.
-    //
-    // Some records are "stream" records, so this function allows sending a sequence of records and
-    // asserting that they come out on the "other side" stiched together into one record
     #[track_caller]
-    fn round_trip<I, R, R2>(send: I, receive: R2)
-    where
-        I: IntoIterator<Item = R>,
-        R: Into<Record>,
-        R2: Into<Record>,
-    {
+    fn round_trip(send: impl Into<Record>) {
         let mut connection = Connection::Test(VecDeque::new());
 
-        for r in send.into_iter() {
-            let record = r.into();
-            connection.write_record(&record).unwrap();
-        }
-        let from_client = connection.read_record().unwrap();
-        assert_eq!(receive.into(), from_client);
+        let record = send.into();
+        connection.write_record(&record).unwrap();
+
+        let received = connection.read_record().unwrap();
+        assert_eq!(received, record);
     }
 
     #[test]
     fn get_values() {
-        round_trip([GetValues::default()], GetValues::default());
-        round_trip(
-            [GetValues::default().add("FCGI_MAX_CONNS")],
-            GetValues::default().add("FCGI_MAX_CONNS"),
-        );
+        round_trip(GetValues::default());
+        round_trip(GetValues::default().add("FCGI_MAX_CONNS"));
     }
 
     #[test]
     fn get_values_result() {
-        round_trip([GetValuesResult::default()], GetValuesResult::default());
+        round_trip(GetValuesResult::default());
 
-        round_trip(
-            [GetValuesResult::default().add("FCGI_MAX_REQS", "1")],
-            GetValuesResult::default().add("FCGI_MAX_REQS", "1"),
-        );
+        round_trip(GetValuesResult::default().add("FCGI_MAX_REQS", "1"));
     }
 
     #[test]
     fn unknown_type() {
-        round_trip([UnknownType::new(100)], UnknownType::new(100));
+        round_trip(UnknownType::new(100));
     }
 
     #[test]
     fn begin_request() {
-        round_trip(
-            [BeginRequest::new(Role::Responder, true)],
-            BeginRequest::new(Role::Responder, true),
-        );
+        round_trip(BeginRequest::new(Role::Responder, true));
     }
 
     #[test]
     fn params() {
-        round_trip([Params::default()], Params::default());
+        round_trip(Params::default());
 
-        round_trip(
-            [Params::default().add("PATH", "/home"), Params::default()],
-            Params::default().add("PATH", "/home"),
-        );
+        round_trip(Params::default().add("PATH", "/home"));
     }
 
     #[test]
     fn stdin() {
-        round_trip([Stdin::new(vec![])], Stdin::new(vec![]));
+        round_trip(Stdin(vec![]));
 
-        round_trip(
-            [
-                Stdin::new(b"HELLO".into()),
-                Stdin::new(b"WORLD".into()),
-                Stdin::new(vec![]),
-            ],
-            Stdin::new(b"HELLOWORLD".into()),
-        );
+        round_trip(Stdin(b"HELLO".into()));
     }
 
     #[test]
     fn stdout() {
-        round_trip([Stdout::new(vec![])], Stdout::new(vec![]));
+        round_trip(Stdout(vec![]));
 
-        round_trip(
-            [
-                Stdout::new(b"HELLO".into()),
-                Stdout::new(b"WORLD".into()),
-                Stdout::new(vec![]),
-            ],
-            Record::Stdout(Stdout::new(b"HELLOWORLD".into())),
-        );
+        round_trip(Stdout(b"HELLO".into()));
     }
 
     #[test]
     fn stderr() {
-        round_trip([Stderr::new(vec![])], Stderr::new(vec![]));
+        round_trip(Stderr(vec![]));
 
-        round_trip(
-            [
-                Stderr::new(b"HELLO".into()),
-                Stderr::new(b"WORLD".into()),
-                Stderr::new(vec![]),
-            ],
-            Stderr::new(b"HELLOWORLD".into()),
-        );
+        round_trip(Stderr(b"HELLO".into()));
     }
 
     #[test]
     fn data() {
-        round_trip([Data::new(vec![])], Data::new(vec![]));
+        round_trip(Data(vec![]));
 
-        round_trip(
-            [
-                Data::new(b"HELLO".into()),
-                Data::new(b"WORLD".into()),
-                Data::new(vec![]),
-            ],
-            Data::new(b"HELLOWORLD".into()),
-        );
+        round_trip(Data(b"HELLO".into()));
     }
 
     #[test]
     fn abort_request() {
-        round_trip([AbortRequest], AbortRequest);
+        round_trip(AbortRequest);
     }
 
     #[test]
     fn end_request() {
-        round_trip(
-            [EndRequest::new(0, ProtocolStatus::RequestComplete)],
-            EndRequest::new(0, ProtocolStatus::RequestComplete),
-        );
+        round_trip(EndRequest::new(0, ProtocolStatus::RequestComplete));
 
-        round_trip(
-            [EndRequest::new(1, ProtocolStatus::UnknownRole)],
-            EndRequest::new(1, ProtocolStatus::UnknownRole),
-        );
+        round_trip(EndRequest::new(1, ProtocolStatus::UnknownRole));
+    }
+}
+
+#[cfg(test)]
+mod stream_parsing_tests {
+    use super::*;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn stream_packet_are_concatenated_when_read() {
+        let mut connection = Connection::Test(VecDeque::new());
+
+        let packets = [
+            Packet {
+                type_id: record::FCGI_STDOUT,
+                content: b"HEL".to_vec(),
+            },
+            Packet {
+                type_id: record::FCGI_STDOUT,
+                content: b"LO".to_vec(),
+            },
+            Packet {
+                type_id: record::FCGI_STDOUT,
+                content: b"WORLD".to_vec(),
+            },
+            Packet {
+                type_id: record::FCGI_STDOUT,
+                content: vec![],
+            },
+        ];
+
+        for packet in packets {
+            connection.write_packet(&packet).unwrap();
+        }
+
+        let actual = connection.read_record().unwrap();
+        let expected = Record::from(Stdout(b"HELLOWORLD".to_vec()));
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn stream_packets_are_broken_up_when_written() {
+        let mut connection = Connection::Test(VecDeque::new());
+        let payload_length = u16::MAX as usize * 5;
+        let payload = b"A".repeat(payload_length);
+
+        let record = Record::from(Stdout(payload.clone()));
+        connection.write_record(&record).unwrap();
+
+        // The payload was larger than the length field in the FastCGI protocol.
+        // This read won't work if the code naively just wrote everything as a single packet
+        // because the resulting bytes won't conform to the spec anymore.
+        let result = connection.read_record();
+
+        assert_matches!(result, Ok(_));
+        let result = result.unwrap();
+        assert_eq!(result, Record::from(Stdout(payload)));
     }
 }

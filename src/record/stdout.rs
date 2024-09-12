@@ -15,8 +15,4 @@ impl Stdout {
     pub fn write_record_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
         writer.write_all(&self.0)
     }
-
-    pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
 }

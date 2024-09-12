@@ -17,11 +17,6 @@ impl Stdin {
         writer.write_all(&self.0)
     }
 
-    /// Creates a new `FCGI_STDIN` record
-    pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-
     /// Takes ownership of the data, leaving an empty `Vec` in its place.
     pub fn take(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.0)

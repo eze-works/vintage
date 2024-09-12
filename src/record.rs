@@ -30,17 +30,20 @@ pub use stdin::Stdin;
 pub use stdout::Stdout;
 pub use unknown::UnknownType;
 
-const FCGI_BEGIN_REQUEST: u8 = 1;
-const FCGI_ABORT_REQUEST: u8 = 2;
-const FCGI_END_REQUEST: u8 = 3;
-const FCGI_PARAMS: u8 = 4;
-const FCGI_STDIN: u8 = 5;
-const FCGI_STDOUT: u8 = 6;
-const FCGI_STDERR: u8 = 7;
-const FCGI_DATA: u8 = 8;
-const FCGI_GET_VALUES: u8 = 9;
-const FCGI_GET_VALUES_RESULT: u8 = 10;
-const FCGI_UNKNOWN_TYPE: u8 = 11;
+pub const FCGI_BEGIN_REQUEST: u8 = 1;
+pub const FCGI_ABORT_REQUEST: u8 = 2;
+pub const FCGI_END_REQUEST: u8 = 3;
+pub const FCGI_PARAMS: u8 = 4;
+pub const FCGI_STDIN: u8 = 5;
+pub const FCGI_STDOUT: u8 = 6;
+pub const FCGI_STDERR: u8 = 7;
+pub const FCGI_DATA: u8 = 8;
+pub const FCGI_GET_VALUES: u8 = 9;
+pub const FCGI_GET_VALUES_RESULT: u8 = 10;
+pub const FCGI_UNKNOWN_TYPE: u8 = 11;
+
+pub const MANAGEMENT_RECORD_TYPES: [u8; 3] =
+    [FCGI_GET_VALUES, FCGI_GET_VALUES_RESULT, FCGI_UNKNOWN_TYPE];
 
 pub const DISCRETE_RECORD_TYPES: [u8; 6] = [
     FCGI_GET_VALUES,
@@ -87,13 +90,6 @@ impl Record {
         }
     }
 
-    pub fn is_management_record(&self) -> bool {
-        matches!(
-            self,
-            Self::GetValues(_) | Self::GetValuesResult(_) | Self::UnknownType(_)
-        )
-    }
-
     pub fn from_bytes(type_id: u8, payload: Vec<u8>) -> Result<Self, Error> {
         let record = match type_id {
             FCGI_GET_VALUES => Record::GetValues(GetValues::from_record_bytes(payload)?),
@@ -131,7 +127,7 @@ impl Record {
     }
 }
 
-// These just make it easier to work with the inner record types
+// This just make it easier to work with the inner record types
 macro_rules!  from_impls {
     ($($t:ident),*) => {
         $(

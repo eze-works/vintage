@@ -337,3 +337,67 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use std::net::TcpStream;
+
+    macro_rules! records {
+        ($($record:expr),*) => {{
+            let mut records: Vec<Record> = vec![];
+            $(
+                records.push($record.into());
+            )*
+            records
+        }}
+    }
+
+    fn assert_request<A: ToSocketAddrs>(
+        address: A,
+        to_send: Vec<Record>,
+        mut expected: Vec<Record>,
+    ) {
+        let socket = TcpStream::connect(address).unwrap();
+        let mut connection = Connection::from(socket);
+
+        for record in to_send.iter() {
+            connection.write_record(record).unwrap();
+        }
+
+        loop {
+            if expected.is_empty() {
+                let result = connection.read_record();
+                assert_matches!(result, Err(Error::UnexpectedSocketClose(_)));
+                break;
+            }
+
+            match connection.read_record() {
+                Ok(record) => {
+                    assert_eq!(record, expected.remove(0));
+                }
+                Err(err) => panic!("{err}"),
+            }
+        }
+    }
+
+    #[test]
+    fn doserver() {
+        let address = "localhost:8000";
+        let _server = start(address, |_| Response::text("hello"));
+
+        assert_request(
+            address,
+            records! {
+                BeginRequest::new(Role::Responder, false),
+                Params::default(),
+                Stdin(vec![])
+            },
+            records! {
+                Stdout(b"Content-Type: text/plain\nStatus: 200\n\nhello".to_vec()),
+                EndRequest::new(0, ProtocolStatus::RequestComplete)
+            },
+        );
+    }
+}
