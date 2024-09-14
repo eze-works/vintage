@@ -17,6 +17,7 @@ pub struct FcgiContext {
     pub(crate) outgoing_headers: BTreeMap<String, String>,
     pub(crate) outgoing_body: Vec<u8>,
     pub(crate) typemap: BTreeMap<TypeId, Box<dyn Any>>,
+    pub(crate) halted: bool,
 }
 
 impl FcgiContext {
@@ -59,6 +60,12 @@ impl FcgiContext {
     /// Returns the request body.
     pub fn body(&self) -> &[u8] {
         self.incoming_body.as_slice()
+    }
+
+    /// Returns a new context that will short-circuit the current pipeline.
+    pub fn halt(mut self) -> Self {
+        self.halted = true;
+        self
     }
 
     /// Returns a new context with the response `Content-Type` header set

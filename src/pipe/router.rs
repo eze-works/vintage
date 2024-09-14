@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
-type Callback = Box<dyn Fn(FcgiContext) -> FcgiContext + Send + Sync + 'static>;
+type Callback =
+    Box<dyn Fn(FcgiContext, BTreeMap<String, String>) -> FcgiContext + Send + Sync + 'static>;
 
 /// A FastCGI request [`Pipe`] for dispatching handlers based on request method and path
 ///
@@ -26,7 +27,7 @@ impl Router {
     pub fn register<P, C>(&mut self, method: &'static str, path: P, callback: C)
     where
         P: Into<String>,
-        C: Fn(FcgiContext) -> FcgiContext,
+        C: Fn(FcgiContext, BTreeMap<String, String>) -> FcgiContext,
         C: Send + Sync + 'static,
     {
         self.map
@@ -37,39 +38,24 @@ impl Router {
 }
 
 impl Pipe for Router {
-    fn push(&self, mut ctx: FcgiContext) -> ControlFlow<FcgiContext, FcgiContext> {
+    fn push(&self, mut ctx: FcgiContext) -> FcgiContext {
         let Some(router) = self.map.get(ctx.method()) else {
-            return ControlFlow::Break(ctx.with_status(status::METHOD_NOT_ALLOWED));
+            return ctx.halt().with_status(status::METHOD_NOT_ALLOWED);
         };
 
-        // The router result borrows the path, through `ctx`.
-        // If I don't clone, the borrow checker later complains when i try to use ctx mutably.
         let path = ctx.path().to_string();
 
         let Ok(entry) = router.at(&path) else {
-            return ControlFlow::Break(ctx.with_status(status::NOT_FOUND));
+            return ctx.halt().with_status(status::NOT_FOUND);
         };
 
-        let mut route = Route(BTreeMap::new());
+        let mut params = BTreeMap::new();
 
         for (key, value) in entry.params.iter() {
-            route.0.insert(key.to_string(), value.to_string());
+            params.insert(key.to_string(), value.to_string());
         }
 
-        ctx.add_data::<Route>(route);
-
-        let response = (entry.value)(ctx);
-
-        ControlFlow::Continue(response)
+        (entry.value)(ctx, params)
     }
 }
 
-/// Storage for matched path segments
-pub struct Route(BTreeMap<String, String>);
-
-impl Route {
-    /// Returns the value of the first paramter registered under the given key
-    pub fn get(&self, key: impl AsRef<str>) -> Option<&str> {
-        self.0.get(key.as_ref()).map(String::as_str)
-    }
-}
