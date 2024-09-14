@@ -1,19 +1,17 @@
 use crate::connection::Connection;
 use crate::error::Error;
+use crate::fcgi_context::FcgiContext;
 use crate::record::*;
-use crate::request::Request;
-use crate::response::Response;
+use convert_case::{Case, Casing};
 use mio::event::Events;
 use mio::net::TcpListener;
 use mio::{Interest, Poll, Token, Waker};
+use std::collections::BTreeMap;
 use std::io::{self};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
-
-// TODO: Logger library
-// Log everywhere you ignore errors.
 
 /// Handle to a running FastCGI server
 pub struct ServerHandle {
@@ -43,6 +41,7 @@ struct Server<F> {
     signal_shutdown: SyncSender<()>,
 }
 
+// Tokens used for the MIO event loop
 const SERVER: Token = Token(0);
 const SHUTDOWN: Token = Token(1);
 
@@ -53,7 +52,7 @@ pub fn start<A, F>(addr: A, handler: F) -> Result<ServerHandle, io::Error>
 where
     A: ToSocketAddrs,
     F: 'static + Sync + Send,
-    F: Fn(Request) -> Response,
+    F: Fn(FcgiContext) -> FcgiContext,
 {
     // One of the requirements is that the user of the library be able to shutdown the server
     // gracefully. This means that there should be some way for the user to say "finish all
@@ -173,7 +172,7 @@ impl ServerHandle {
 impl<F> Server<F>
 where
     F: 'static + Sync + Send,
-    F: Fn(Request) -> Response,
+    F: Fn(FcgiContext) -> FcgiContext,
 {
     fn server_loop(mut self) -> ServerExitReason {
         // `shutdown_threadpool` should always be called before exiting this function, regardless of
@@ -273,7 +272,7 @@ where
             return;
         }
 
-        let params = match conn.expect_params() {
+        let mut params = match conn.expect_params() {
             Ok(params) => params,
             Err(None) => {
                 log::error!("FastCGI connection missing Params record. Closing connection");
@@ -284,7 +283,7 @@ where
             }
         };
 
-        let stdin = match conn.expect_stdin() {
+        let mut stdin = match conn.expect_stdin() {
             Ok(stdin) => stdin,
             Err(None) => {
                 log::error!("FastCGI connection missing Stdin record. Closing connection");
@@ -295,10 +294,45 @@ where
             }
         };
 
-        let response = handler(Request {
-            vars: params,
-            body: stdin,
-        });
+        let mut vars = params.take();
+
+        let Some(method) = vars.remove("REQUEST_METHOD") else {
+            log::error!("FastCGI request missing REQUEST_METHOD header. Closing connection.");
+            return;
+        };
+
+        let Some(path) = vars.remove("PATH_INFO") else {
+            log::error!("FastCGI request missing PATH_INFO header. Closing connection.");
+            return;
+        };
+
+        let Some(query_string) = vars.remove("QUERY_STRING") else {
+            log::error!("FastCGI request missing QUERY_STRING header. Closing connection.");
+            return;
+        };
+
+        let mut incoming_headers = BTreeMap::new();
+        for (k, v) in vars {
+            if let Some(suffix) = k.strip_prefix("HTTP_") {
+                incoming_headers.insert(suffix.to_case(Case::Train), v);
+            }
+        }
+
+        let mut query = BTreeMap::new();
+        for (k, v) in form_urlencoded::parse(query_string.as_str().as_bytes()) {
+            query.insert(k.to_string(), v.to_string());
+        }
+
+        let context = FcgiContext {
+            method,
+            path,
+            query,
+            incoming_headers,
+            incoming_body: stdin.take(),
+            ..FcgiContext::default()
+        };
+
+        let response = handler(context);
 
         let mut stdout = Stdout(vec![]);
         let _ = response.write_stdout_bytes(&mut stdout.0);
@@ -363,6 +397,13 @@ mod tests {
         }}
     }
 
+    fn basic_params() -> Params {
+        Params::default()
+            .add("REQUEST_METHOD", "GET")
+            .add("PATH_INFO", "/")
+            .add("QUERY_STRING", "")
+    }
+
     // Test that when we send `to_send` records to the server at `address`, we get back the
     // `expected` records
     #[track_caller]
@@ -392,7 +433,7 @@ mod tests {
 
     #[test]
     fn get_values() {
-        let server = start("localhost:0", |_| Response::text("hello")).unwrap();
+        let server = start("localhost:0", |ctx| ctx).unwrap();
 
         assert_request(
             server.address(),
@@ -417,13 +458,13 @@ mod tests {
 
     #[test]
     fn unsupported_keepalive() {
-        let server = start("localhost:0", |_| Response::default()).unwrap();
+        let server = start("localhost:0", |ctx| ctx).unwrap();
 
         assert_request(
             server.address(),
             records! {
                 BeginRequest::new(Role::Responder, true),
-                Params::default(),
+                basic_params(),
                 Stdin(vec![])
             },
             records! {
@@ -434,11 +475,10 @@ mod tests {
 
     #[test]
     fn successful_responder_flow() {
-        // A server that responds with concatenating the PARAM metavariable with the body
-        let server = start("localhost:0", |mut req| {
-            let body = String::from_utf8(req.read_body()).unwrap();
-            let param = req.get("PARAM").unwrap();
-            Response::text(format!("{param}:{body}"))
+        // A server that echoes the body
+        let server = start("localhost:0", |ctx| {
+            let body = ctx.body().to_vec();
+            ctx.with_raw_body(body)
         })
         .unwrap();
 
@@ -446,11 +486,11 @@ mod tests {
             server.address(),
             records! {
                 BeginRequest::new(Role::Responder, false),
-                Params::default().add("PARAM", "FOO"),
+                basic_params(),
                 Stdin(b"BAR".to_vec())
             },
             records! {
-                Stdout(b"Content-Type: text/plain\nStatus: 200\n\nFOO:BAR".to_vec()),
+                Stdout(b"\nBAR".to_vec()),
                 EndRequest::new(0, ProtocolStatus::RequestComplete)
             },
         );

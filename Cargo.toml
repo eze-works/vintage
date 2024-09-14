@@ -11,7 +11,10 @@ keywords = ["fastcgi", "cgi"]
 
 [dependencies]
 bufstream = "0.1.4"
+convert_case = "0.6.0"
+form_urlencoded = "1.2.1"
 log = { version = "0.4.22", features = ["kv_std"] }
+matchit = "0.8.4"
 mio = { version = "1.0.2", features = ["os-ext", "net"] }
 paste = "1.0.15"
 thiserror = "1.0.63"

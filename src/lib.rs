@@ -6,11 +6,11 @@
 //! # Example
 //!
 //!  ```
-//!  use vintage::{start, Response};
+//!  use vintage::start;
 //!
 //!  fn main() {
-//!      let server = start("localhost:8000", |_request| {
-//!          Response::html("<h1>Hello World</h1>")
+//!      let server = start("localhost:8000", |ctx| {
+//!          ctx.with_body("<h1>Hello World</h1>")
 //!      }).unwrap();
 //!      
 //!      // This would block the current thread until the server thread exits
@@ -64,11 +64,11 @@
 #![allow(dead_code)]
 mod connection;
 mod error;
+pub mod pipe;
 mod record;
-mod request;
-mod response;
+mod fcgi_context;
 mod server;
+pub mod status;
 
-pub use request::Request;
-pub use response::Response;
+pub use fcgi_context::FcgiContext;
 pub use server::{start, ServerExitReason, ServerHandle};
