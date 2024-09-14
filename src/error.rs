@@ -14,7 +14,7 @@ pub enum Error {
     #[error("Multiplexing multiple requests unto a single connection is not supported")]
     MultiplexingUnsupported,
 
-    #[error("Received malfored FastCGI record for type '{0}'")]
+    #[error("Received malformed FastCGI record for type '{0}'")]
     MalformedRecordPayload(&'static str),
 
     #[error("Unsuported FastCGI role: '{0}'")]

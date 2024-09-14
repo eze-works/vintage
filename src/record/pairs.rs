@@ -17,13 +17,33 @@ fn read_pair_len<R: Read>(reader: &mut R) -> Result<u32, Error> {
         return Ok(sentinel[0] as u32);
     }
 
-    let mut len_bytes = [sentinel[0], 0, 0, 0];
+    let mut len_bytes = [sentinel[0] & 0b0111_1111, 0, 0, 0];
     reader
         .read_exact(&mut len_bytes[1..])
         .map_err(|_| Error::MalformedRecordPayload("Params"))?;
 
     let len = u32::from_be_bytes(len_bytes);
     Ok(len)
+}
+
+fn write_pair_len<W: Write>((key, value): (&str, &str), writer: &mut W) -> Result<(), io::Error> {
+    if key.len() > 127 {
+        let mut len_bytes = (key.len() as u32).to_be_bytes();
+        len_bytes[0] |= 0b1000_0000;
+        writer.write_all(&len_bytes)?;
+    } else {
+        writer.write_all(&(key.len() as u8).to_be_bytes())?;
+    }
+
+    if value.len() > 127 {
+        let mut len_bytes = (value.len() as u32).to_be_bytes();
+        len_bytes[0] |= 0b1000_0000;
+        writer.write_all(&len_bytes)?;
+    } else {
+        writer.write_all(&(value.len() as u8).to_be_bytes())?;
+    }
+
+    Ok(())
 }
 
 // FastCGI transmits a name-value pair as the length of the name, followed by the length of the
@@ -65,17 +85,7 @@ pub fn from_record_bytes(bytes: Vec<u8>) -> Result<Pairs, Error> {
 
 pub fn to_record_bytes<W: Write>(pairs: &Pairs, writer: &mut W) -> Result<(), io::Error> {
     for (key, value) in pairs.iter() {
-        if key.len() > 127 {
-            writer.write_all(&(key.len() as u32).to_be_bytes())?;
-        } else {
-            writer.write_all(&(key.len() as u8).to_be_bytes())?;
-        }
-
-        if value.len() > 127 {
-            writer.write_all(&(value.len() as u32).to_be_bytes())?;
-        } else {
-            writer.write_all(&(value.len() as u8).to_be_bytes())?;
-        }
+        write_pair_len((key.as_str(), value.as_str()), writer)?;
         write!(writer, "{}{}", key, value)?;
     }
 

@@ -292,8 +292,12 @@ mod round_trip_tests {
     #[test]
     fn params() {
         round_trip(Params::default());
-
         round_trip(Params::default().add("PATH", "/home"));
+        
+        let long_key = "a".repeat(256);
+        let long_value = "b".repeat(256);
+
+        round_trip(Params::default().add(long_key, long_value));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Composing FastCGI request processing
+//! Composing FastCGI requests
 //!
 //! You can view the handling of a FastCGI request as pipeline, or sequence of steps.
 //! Each step may modify the `Response`.
@@ -28,9 +28,9 @@ pub use router::Router;
 /// among connection-handling threads.
 ///
 /// By default, the next pipe configured pipe will run, unless the
-/// [`FcgiContext::halt()`](crate::FcgiContext) is called, which short-circuits the pipeline.
+/// [`FcgiContext::halt()`](crate::FcgiContext::halt) is called, which short-circuits the pipeline.
 pub trait Pipe: Sized {
     /// Run the pipe logic with the given context, and return a signal indicating if the next stage in the chain should
     /// run, or if the response should be used as is.
-    fn push(&self, ctx: FcgiContext) -> FcgiContext;
+    fn run(&self, ctx: FcgiContext) -> FcgiContext;
 }

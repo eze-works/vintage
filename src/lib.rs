@@ -2,8 +2,10 @@
 //! It mostly implements the [FastCGI](https://www.mit.edu/~yandros/doc/specs/fcgi-spec.html#S4)
 //! spec, but [deviates](crate#deviations-from-the-spec) where it makes sense to do so.
 //!
+//! The [terminology](crate#terminology) section contains definitions for words used throughout the
+//! documentation.
 //!
-//! # Example
+//! Using this crate is straightforward:
 //!
 //!  ```
 //!  use vintage::start;
@@ -20,6 +22,14 @@
 //!      server.stop();
 //!  }
 //!  ```
+//!
+//!  The [`start`] function accepts two arguments:
+//!  - The address on which the server should listen.
+//!  - A function to handle FastCGI requests.
+//!    It is passed a single [`FcgiContext`] argument, and must return an value of the same type.
+//!
+//! The crate also provides an optional layer called [`pipe`]s to help compose request processing
+//! together.
 //!
 //! # Terminology:
 //!
@@ -64,9 +74,9 @@
 #![allow(dead_code)]
 mod connection;
 mod error;
+mod fcgi_context;
 pub mod pipe;
 mod record;
-mod fcgi_context;
 mod server;
 pub mod status;
 
