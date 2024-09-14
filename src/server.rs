@@ -319,7 +319,7 @@ where
         }
 
         let mut query = BTreeMap::new();
-        for (k, v) in form_urlencoded::parse(query_string.as_str().as_bytes()) {
+        for (k, v) in form_urlencoded::parse(query_string.as_bytes()) {
             query.insert(k.to_string(), v.to_string());
         }
 

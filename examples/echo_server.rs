@@ -1,8 +1,8 @@
 use vintage::pipe::{Pipe, Router};
-use vintage::{start, status};
+use vintage::start;
 
 fn main() {
-    let mut router = Router::new()
+    let router = Router::new()
         .get("/echo/{msg}", |ctx, params| {
             let msg = &params["msg"];
             ctx.with_html_body(msg).with_status(200)

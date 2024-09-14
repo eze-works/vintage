@@ -2,13 +2,13 @@ use crate::fcgi_context::FcgiContext;
 use crate::pipe::Pipe;
 use crate::status;
 use std::collections::BTreeMap;
-use std::ops::ControlFlow;
 
 /// A FastCGI request [`Pipe`] for dispatching handlers based on request method and path
 
 type RouteParams = BTreeMap<String, String>;
 type RouterCallback = Box<dyn Fn(FcgiContext, RouteParams) -> FcgiContext + Send + Sync>;
 
+#[derive(Default)]
 pub struct Router {
     map: BTreeMap<&'static str, matchit::Router<RouterCallback>>,
 }
@@ -57,9 +57,10 @@ impl Router {
         C: Fn(FcgiContext, RouteParams) -> FcgiContext,
         C: 'static + Send + Sync,
     {
-        self.map
+        let _ = self
+            .map
             .entry(method)
-            .or_insert(matchit::Router::new())
+            .or_default()
             .insert(path, Box::new(callback));
         self
     }
@@ -67,7 +68,7 @@ impl Router {
     /// Registers a path for the "GET" method
     ///
     /// See [`Router::register`]
-    pub fn get<C, P>(mut self, path: P, callback: C) -> Self
+    pub fn get<C, P>(self, path: P, callback: C) -> Self
     where
         P: Into<String>,
         C: Fn(FcgiContext, RouteParams) -> FcgiContext,
@@ -79,7 +80,7 @@ impl Router {
     /// Registers a path for the "POST" method
     ///
     /// See [`Router::register`]
-    pub fn post<C, P>(mut self, path: P, callback: C) -> Self
+    pub fn post<C, P>(self, path: P, callback: C) -> Self
     where
         P: Into<String>,
         C: Fn(FcgiContext, RouteParams) -> FcgiContext,
@@ -91,7 +92,7 @@ impl Router {
     /// Registers a path for the "PUT" method
     ///
     /// See [`Router::register`]
-    pub fn put<C, P>(mut self, path: P, callback: C) -> Self
+    pub fn put<C, P>(self, path: P, callback: C) -> Self
     where
         P: Into<String>,
         C: Fn(FcgiContext, RouteParams) -> FcgiContext,
@@ -103,7 +104,7 @@ impl Router {
     /// Registers a path for the "DELETE" method
     ///
     /// See [`Router::register`]
-    pub fn delete<C, P>(mut self, path: P, callback: C) -> Self
+    pub fn delete<C, P>(self, path: P, callback: C) -> Self
     where
         P: Into<String>,
         C: Fn(FcgiContext, RouteParams) -> FcgiContext,
@@ -114,7 +115,7 @@ impl Router {
 }
 
 impl Pipe for Router {
-    fn run(&self, mut ctx: FcgiContext) -> FcgiContext {
+    fn run(&self, ctx: FcgiContext) -> FcgiContext {
         let Some(router) = self.map.get(ctx.method()) else {
             return ctx.halt().with_status(status::METHOD_NOT_ALLOWED);
         };

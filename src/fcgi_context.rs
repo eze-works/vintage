@@ -154,7 +154,7 @@ mod tests {
     #[track_caller]
     fn assert_serialized(ctx: FcgiContext, expected: &str) {
         let mut buf = vec![];
-        ctx.write_stdout_bytes(&mut buf);
+        ctx.write_stdout_bytes(&mut buf).unwrap();
         assert_eq!(String::from_utf8_lossy(&buf), expected);
     }
 
