@@ -10,6 +10,7 @@ macro_rules! status_codes {
 
 status_codes! {
     OK                          200,
+    NOT_MODIFIED                304,
     TEMPORARY_REDIRECT          307,
     PERMANENT_REDIRECT          308,
     BAD_REQUEST                 400,

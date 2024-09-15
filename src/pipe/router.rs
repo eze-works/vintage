@@ -3,11 +3,10 @@ use crate::pipe::Pipe;
 use crate::status;
 use std::collections::BTreeMap;
 
-/// A FastCGI request [`Pipe`] for dispatching handlers based on request method and path
-
 type RouteParams = BTreeMap<String, String>;
 type RouterCallback = Box<dyn Fn(FcgiContext, RouteParams) -> FcgiContext + Send + Sync>;
 
+/// A [`Pipe`] for dispatching handlers based on request method and path
 #[derive(Default)]
 pub struct Router {
     map: BTreeMap<&'static str, matchit::Router<RouterCallback>>,

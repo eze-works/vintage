@@ -57,6 +57,11 @@ impl FcgiContext {
         self.query.get(key).map(String::as_str)
     }
 
+    /// Returns the value of the request header `name` if it exists
+    pub fn get_header(&self, header: &str) -> Option<&str> {
+        self.incoming_headers.get(header).map(String::as_str)
+    }
+
     /// Returns the request body.
     pub fn body(&self) -> &[u8] {
         self.incoming_body.as_slice()
@@ -69,24 +74,18 @@ impl FcgiContext {
     }
 
     /// Returns a new context with the response `Content-Type` header set
-    pub fn with_content_type<S: Into<String>>(mut self, content_type: S) -> Self {
-        self.outgoing_headers
-            .insert("Content-Type".into(), content_type.into());
-        self
+    pub fn with_content_type<S: Into<String>>(self, content_type: S) -> Self {
+        self.with_header("Content-Type", content_type)
     }
 
     /// Returns a new context with the response status set
-    pub fn with_status(mut self, code: u16) -> Self {
-        self.outgoing_headers
-            .insert("Status".into(), code.to_string());
-        self
+    pub fn with_status(self, code: u16) -> Self {
+        self.with_header("Status", code.to_string())
     }
 
     /// Returns a new context with the location response header set
-    pub fn with_location<S: Into<String>>(mut self, location: S) -> Self {
-        self.outgoing_headers
-            .insert("Location".into(), location.into());
-        self
+    pub fn with_location<S: Into<String>>(self, location: S) -> Self {
+        self.with_header("Location", location)
     }
 
     /// Returns a new context with the response body set
@@ -134,6 +133,12 @@ impl FcgiContext {
     pub fn with_temporary_redirect<S: Into<String>>(self, path: S) -> Self {
         self.with_status(status::TEMPORARY_REDIRECT)
             .with_location(path)
+    }
+
+    /// Returns a new context with the given header set.
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.outgoing_headers.insert(key.into(), value.into());
+        self
     }
 }
 
