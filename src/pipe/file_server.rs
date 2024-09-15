@@ -3,7 +3,6 @@ use crate::status;
 use camino::Utf8PathBuf;
 use filetime::FileTime;
 use std::fs;
-use std::path::PathBuf;
 
 /// A [`Pipe`] for serving static files
 #[derive(Debug, Clone)]
@@ -146,8 +145,6 @@ impl Pipe for FileServer {
             Err(_) => return ctx.halt().with_status(status::NOT_FOUND),
         };
 
-        if let Some(old_etag) = ctx.get_header("If-None-Match") {}
-
         let extension = path.extension();
         let content_type = extension_to_mime_impl(extension);
 
@@ -162,7 +159,6 @@ impl Pipe for FileServer {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use std::env;
 
     #[test]
     fn empty_arguments() {
@@ -195,7 +191,6 @@ mod tests {
 
     #[test]
     fn using_a_prefix() {
-        let wd = Utf8PathBuf::try_from(env::current_dir().unwrap()).unwrap();
         let fs = FileServer::new("/static", "");
 
         assert_eq!(fs.resolve_path("/"), ResolveResult::Ignore);
