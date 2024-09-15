@@ -79,7 +79,6 @@ impl Router {
     {
         let callback = Arc::new(callback);
         for path in paths {
-            dbg!(&path);
             self.map
                 .entry(method)
                 .or_default()

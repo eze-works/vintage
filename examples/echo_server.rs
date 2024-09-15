@@ -9,7 +9,8 @@ fn main() {
         })
         .get(["/greet"], |ctx, _| {
             ctx.with_html_body("<h1>Hello World</h1>").with_status(200)
-        });
+        })
+        .not_found(|ctx| ctx.with_html_body("<h1>Not Found</h1>").with_status(404));
 
     let server = start("localhost:8000", move |ctx| router.run(ctx)).unwrap();
 
