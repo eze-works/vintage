@@ -1,7 +1,8 @@
-use crate::pipe::Pipe;
 use crate::status;
+use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
+use std::rc::Rc;
 
 /// Encapsulates all information about an individual FastCGI request and response.
 ///
@@ -16,18 +17,15 @@ pub struct FcgiContext {
     pub(crate) incoming_body: Vec<u8>,
     pub(crate) outgoing_headers: BTreeMap<String, String>,
     pub(crate) outgoing_body: Vec<u8>,
-    pub(crate) data: BTreeMap<&'static str, String>,
+    pub(crate) data: BTreeMap<TypeId, Rc<dyn Any>>,
 }
 
 impl FcgiContext {
-    /// Returns a reference to data previously [stored](FcgiContext::with_data).
-    pub fn get_data(&self, key: &str) -> Option<&str> {
-        self.data.get(key).map(|s| s.as_str())
-    }
-
-    /// Returns a mutable reference to data previously [stored](FcgiContext::with_data).
-    pub fn get_mut_data(&mut self, key: &str) -> Option<&mut str> {
-        self.data.get_mut(key).map(|s| s.as_mut_str())
+    /// Returns a shared reference to previously [stored](FcgiContext::with_data) data.
+    pub fn get_data<D: Any>(&self) -> Option<&D> {
+        self.data
+            .get(&TypeId::of::<D>())
+            .and_then(|b| b.downcast_ref::<D>())
     }
 
     /// Returns the request method
@@ -123,11 +121,11 @@ impl FcgiContext {
         self
     }
 
-    /// Store data, to be used in later stages of a request pipeline
+    /// Store data, keyed by type, to be used in later stages of a request pipeline
     ///
     /// This overwrites any previous value of the same type.
-    pub fn with_data(mut self, key: &'static str, value: impl Into<String>) -> Self {
-        self.data.insert(key, value.into());
+    pub fn with_data(mut self, value: impl Any) -> Self {
+        self.data.insert(value.type_id(), Rc::new(value));
         self
     }
 }
@@ -139,13 +137,6 @@ impl FcgiContext {
         }
         writeln!(writer)?;
         writer.write_all(&self.outgoing_body)
-    }
-}
-
-impl Pipe for FcgiContext {
-    /// A context implements [`Pipe`] by returning itself.
-    fn run(&self, _ctx: FcgiContext) -> Option<FcgiContext> {
-        Some(self.clone())
     }
 }
 

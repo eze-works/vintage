@@ -6,10 +6,12 @@
 //!
 //! You are not limited to the pipes defined in this module as it is easy to implement your own.
 //! See the [`Pipe`] trait docs for details.
+mod custom;
 mod file_server;
 mod router;
 
 use crate::fcgi_context::FcgiContext;
+pub use custom::custom;
 pub use file_server::FileServer;
 pub use router::Router;
 
@@ -90,6 +92,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     // Create two simple pipes for testing
     // One pipe only succeeds if the request method is "GET".
@@ -99,11 +102,15 @@ mod tests {
 
     struct MethodPipe;
     struct PathPipe;
+    #[derive(Debug)]
+    struct MethodPipeExecuted;
+    #[derive(Debug)]
+    struct PathPipeExecuted;
 
     impl Pipe for MethodPipe {
         fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
             if ctx.method() == "GET" {
-                Some(ctx.with_data("Method", "true"))
+                Some(ctx.with_data(MethodPipeExecuted))
             } else {
                 None
             }
@@ -113,7 +120,7 @@ mod tests {
     impl Pipe for PathPipe {
         fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
             if ctx.path() == "/path" {
-                Some(ctx.with_data("Path", "true"))
+                Some(ctx.with_data(PathPipeExecuted))
             } else {
                 None
             }
@@ -144,8 +151,8 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx).unwrap();
-        assert_eq!(result.get_data("Method"), Some("true"));
-        assert_eq!(result.get_data("Path"), Some("true"));
+        assert_matches!(result.get_data::<MethodPipeExecuted>(), Some(_));
+        assert_matches!(result.get_data::<PathPipeExecuted>(), Some(_));
     }
 
     #[test]
@@ -163,8 +170,8 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx).unwrap();
-        assert_eq!(result.get_data("Method"), Some("true"));
-        assert_eq!(result.get_data("Path"), None);
+        assert_matches!(result.get_data::<MethodPipeExecuted>(), Some(_));
+        assert_matches!(result.get_data::<PathPipeExecuted>(), None);
 
         // First fails, second succeeds
         let ctx = FcgiContext {
@@ -172,7 +179,7 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx).unwrap();
-        assert_eq!(result.get_data("Method"), None);
-        assert_eq!(result.get_data("Path"), Some("true"));
+        assert_matches!(result.get_data::<MethodPipeExecuted>(), None);
+        assert_matches!(result.get_data::<PathPipeExecuted>(), Some(_));
     }
 }

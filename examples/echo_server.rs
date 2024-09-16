@@ -1,11 +1,11 @@
-use vintage::pipe::{Pipe, Router};
-use vintage::{start, FcgiContext};
+use vintage::pipe::{self, Pipe};
+use vintage::start;
 
 fn main() {
-    let fallback = FcgiContext::default()
-        .with_html_body("<h1>Not Found</h1>")
-        .with_status(404);
-    let router = Router::new()
+    let fallback =
+        pipe::custom(move |ctx| Some(ctx.with_html_body("<h1>Not Found</h1>").with_status(404)));
+
+    let router = pipe::Router::new()
         .get(["/echo/{msg}"], |ctx, params| {
             let msg = &params["msg"];
             ctx.with_html_body(msg).with_status(200)
