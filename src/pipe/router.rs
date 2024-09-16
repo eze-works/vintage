@@ -148,11 +148,11 @@ impl Router {
 impl Pipe for Router {
     fn run(&self, ctx: FcgiContext) -> FcgiContext {
         let Some(router) = self.map.get(ctx.method()) else {
-            return (self.not_found_callback)(ctx);
+            return (self.not_found_callback)(ctx.halt());
         };
 
         let Ok(entry) = router.at(ctx.path()) else {
-            return (self.not_found_callback)(ctx);
+            return (self.not_found_callback)(ctx.halt());
         };
 
         let mut params = BTreeMap::new();

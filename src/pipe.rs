@@ -32,16 +32,27 @@ pub use router::Router;
 /// By default, the next pipe configured pipe will run, unless the
 /// [`FcgiContext::halt()`](crate::FcgiContext::halt) is called, which short-circuits the pipeline.
 pub trait Pipe: Sized {
-    /// Run the pipe logic with the given context, and return a signal indicating if the next stage in the chain should
-    /// run, or if the response should be used as is.
+    /// Runs the pipe logic.
+    /// Pipes can indicate failure by calling  [`.halt()`] and returning the resulting context.
     fn run(&self, ctx: FcgiContext) -> FcgiContext;
 
     /// Expresses a sequence of pipes
     ///
-    /// Returns a new pipe that will provide the result of running this pipe as arguments to the `other` pipe.
-    /// If this pipe halted, the `other` pipe does not get executed.
+    /// Returns a new pipe that will run this pipe and the `other` pipe in sequence, providing the result of running this pipe as arguments to the `other` pipe.
+    /// If this pipe halts, the `other` pipe does not run.
     fn and<P: Pipe>(self, other: P) -> And<Self, P> {
         And {
+            first: self,
+            second: other,
+        }
+    }
+
+    /// Expresses an alternate pipe
+    ///
+    /// Returns a new pipe that will return the result of running this pipe.
+    /// If this pipe halts, the other pipe is tried with the original context.
+    fn or<P: Pipe>(self, other: P) -> Or<Self, P> {
+        Or {
             first: self,
             second: other,
         }
@@ -50,6 +61,12 @@ pub trait Pipe: Sized {
 
 /// See [`Pipe::and`]
 pub struct And<P1, P2> {
+    first: P1,
+    second: P2,
+}
+
+/// See [`Pipe::or`]
+pub struct Or<P1, P2> {
     first: P1,
     second: P2,
 }
@@ -66,5 +83,121 @@ where
         } else {
             self.second.run(result)
         }
+    }
+}
+
+impl<P1, P2> Pipe for Or<P1, P2>
+where
+    P1: Pipe,
+    P2: Pipe,
+{
+    fn run(&self, ctx: FcgiContext) -> FcgiContext {
+        let cloned = ctx.clone();
+        let result = self.first.run(cloned);
+
+        if result.halted {
+            self.second.run(ctx)
+        } else {
+            result
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Create two simple pipes for testing
+    // One pipe only succeeds if the request method is "GET".
+    // The other pipe only succeeds if the request path is "/path"
+    //
+    // Both pipes set a flag so it is possible to tell which of them succeeded
+
+    struct MethodPipe;
+    struct PathPipe;
+
+    impl Pipe for MethodPipe {
+        fn run(&self, ctx: FcgiContext) -> FcgiContext {
+            if ctx.method() == "GET" {
+                ctx.with_data("Method", "true")
+            } else {
+                ctx.halt()
+            }
+        }
+    }
+
+    impl Pipe for PathPipe {
+        fn run(&self, ctx: FcgiContext) -> FcgiContext {
+            if ctx.path() == "/path" {
+                ctx.with_data("Path", "true")
+            } else {
+                ctx.halt()
+            }
+        }
+    }
+
+    #[test]
+    fn pipe_and() {
+        let pipe = MethodPipe.and(PathPipe);
+
+        // Both fail.
+        let ctx = FcgiContext::default();
+        let result = pipe.run(ctx);
+        assert!(result.is_halted());
+        assert_eq!(result.get_data("Method"), None);
+        assert_eq!(result.get_data("Path"), None);
+
+        // First succeeds, second fails
+        let ctx = FcgiContext {
+            method: "GET".into(),
+            ..FcgiContext::default()
+        };
+        let result = pipe.run(ctx);
+        assert!(result.is_halted());
+        assert_eq!(result.get_data("Method"), Some("true"));
+        assert_eq!(result.get_data("Path"), None);
+
+        // Both succeed
+        let ctx = FcgiContext {
+            method: "GET".into(),
+            path: "/path".into(),
+            ..FcgiContext::default()
+        };
+        let result = pipe.run(ctx);
+        assert!(!result.is_halted());
+        assert_eq!(result.get_data("Method"), Some("true"));
+        assert_eq!(result.get_data("Path"), Some("true"));
+    }
+
+    #[test]
+    fn pipe_or() {
+        let pipe = MethodPipe.or(PathPipe);
+
+        // Both fail
+        let ctx = FcgiContext::default();
+        let result = pipe.run(ctx);
+        assert!(result.is_halted());
+        assert_eq!(result.get_data("Method"), None);
+        assert_eq!(result.get_data("Path"), None);
+
+        // First succeeds, second does not get run
+        let ctx = FcgiContext {
+            method: "GET".into(),
+            ..FcgiContext::default()
+        };
+        let result = pipe.run(ctx);
+        assert!(!result.is_halted());
+        assert_eq!(result.get_data("Method"), Some("true"));
+        assert_eq!(result.get_data("Path"), None);
+
+        // First fails, second succeeds
+        let ctx = FcgiContext {
+            path: "/path".into(),
+            ..FcgiContext::default()
+        };
+        let result = pipe.run(ctx);
+        assert!(!result.is_halted());
+        assert_eq!(result.get_data("Method"), None);
+        assert_eq!(result.get_data("Path"), Some("true"));
     }
 }

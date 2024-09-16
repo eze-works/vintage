@@ -92,14 +92,14 @@ impl FileServer {
 
 impl Pipe for FileServer {
     fn run(&self, mut ctx: crate::FcgiContext) -> crate::FcgiContext {
-        // Ignore non GET requests
         if ctx.method() != "GET" {
-            return ctx;
+            return ctx.halt().with_status(status::NOT_FOUND);
         }
 
         let (path, mtime) = match self.resolve_path(ctx.path()) {
-            ResolveResult::Ignore => return ctx,
-            ResolveResult::NotFound => return ctx.halt().with_status(status::NOT_FOUND),
+            ResolveResult::NotFound | ResolveResult::Ignore => {
+                return ctx.halt().with_status(status::NOT_FOUND)
+            }
             ResolveResult::Found(p, m) => (p, m),
         };
 
@@ -136,7 +136,7 @@ impl Pipe for FileServer {
             // If-None-Match: *
 
             if request_etag.contains(&current_etag_value) {
-                return ctx.halt().with_status(status::NOT_MODIFIED);
+                return ctx.with_status(status::NOT_MODIFIED);
             }
         }
 
@@ -148,8 +148,7 @@ impl Pipe for FileServer {
         let extension = path.extension();
         let content_type = extension_to_mime_impl(extension);
 
-        ctx.halt()
-            .with_status(status::OK)
+        ctx.with_status(status::OK)
             .with_content_type(content_type)
             .with_raw_body(bytes)
     }

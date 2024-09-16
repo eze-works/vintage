@@ -1,5 +1,4 @@
 use crate::status;
-use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
@@ -7,7 +6,7 @@ use std::io::{self, Write};
 ///
 /// A [`Pipe`](crate::pipe::Pipe) may also use this structure to [store](FcgiContext::add_data) data
 /// to be used in later stages of the pipeline.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FcgiContext {
     pub(crate) method: String,
     pub(crate) path: String,
@@ -16,30 +15,19 @@ pub struct FcgiContext {
     pub(crate) incoming_body: Vec<u8>,
     pub(crate) outgoing_headers: BTreeMap<String, String>,
     pub(crate) outgoing_body: Vec<u8>,
-    pub(crate) typemap: BTreeMap<TypeId, Box<dyn Any>>,
+    pub(crate) data: BTreeMap<&'static str, String>,
     pub(crate) halted: bool,
 }
 
 impl FcgiContext {
-    /// Store data, keyed by type, to be used in later stages of a request pipeline
-    ///
-    /// This overwrites any previous value of the same type.
-    pub fn add_data<T: Any + 'static>(&mut self, value: T) {
-        self.typemap.insert(value.type_id(), Box::new(value));
+    /// Returns a reference to data previously [stored](FcgiContext::with_data).
+    pub fn get_data(&self, key: &str) -> Option<&str> {
+        self.data.get(key).map(|s| s.as_str())
     }
 
-    /// Returns a reference to data previously [stored](FcgiContext::add_data) by type.
-    pub fn get_data<T: Any + 'static>(&self) -> Option<&T> {
-        self.typemap
-            .get(&TypeId::of::<T>())
-            .and_then(|b| b.downcast_ref::<T>())
-    }
-
-    /// Returns a mutable reference to data previously [stored](FcgiContext::add_data) by type.
-    pub fn get_mut_data<T: Any + 'static>(&mut self) -> Option<&mut T> {
-        self.typemap
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|b| b.downcast_mut::<T>())
+    /// Returns a mutable reference to data previously [stored](FcgiContext::with_data).
+    pub fn get_mut_data(&mut self, key: &str) -> Option<&mut str> {
+        self.data.get_mut(key).map(|s| s.as_mut_str())
     }
 
     /// Returns the request method
@@ -71,6 +59,11 @@ impl FcgiContext {
     pub fn halt(mut self) -> Self {
         self.halted = true;
         self
+    }
+
+    /// Returns `true` if this pipe has been halted
+    pub fn is_halted(&self) -> bool {
+        self.halted
     }
 
     /// Returns a new context with the response `Content-Type` header set
@@ -138,6 +131,14 @@ impl FcgiContext {
     /// Returns a new context with the given header set.
     pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.outgoing_headers.insert(key.into(), value.into());
+        self
+    }
+
+    /// Store data, to be used in later stages of a request pipeline
+    ///
+    /// This overwrites any previous value of the same type.
+    pub fn with_data(mut self, key: &'static str, value: impl Into<String>) -> Self {
+        self.data.insert(key, value.into());
         self
     }
 }
