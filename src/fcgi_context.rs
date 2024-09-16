@@ -3,12 +3,13 @@ use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::rc::Rc;
+use std::time::Instant;
 
 /// Encapsulates all information about an individual FastCGI request and response.
 ///
 /// A [`Pipe`](crate::pipe::Pipe) may also use this structure to [store](FcgiContext::with_data) data
 /// to be used in later stages of the pipeline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FcgiContext {
     pub(crate) method: String,
     pub(crate) path: String,
@@ -18,11 +19,26 @@ pub struct FcgiContext {
     pub(crate) outgoing_headers: BTreeMap<String, String>,
     pub(crate) outgoing_body: Vec<u8>,
     pub(crate) data: BTreeMap<TypeId, Rc<dyn Any>>,
+    pub(crate) created_at: Instant,
 }
 
 impl FcgiContext {
+    pub(crate) fn new() -> Self {
+        Self {
+            method: String::new(),
+            path: String::new(),
+            query: BTreeMap::new(),
+            incoming_headers: BTreeMap::new(),
+            incoming_body: Vec::new(),
+            outgoing_headers: BTreeMap::new(),
+            outgoing_body: Vec::new(),
+            data: BTreeMap::new(),
+            created_at: Instant::now(),
+        }
+    }
+
     /// Returns a shared reference to previously [stored](FcgiContext::with_data) data.
-    pub fn get_data<D: Any>(&self) -> Option<&D> {
+    pub fn data<D: Any>(&self) -> Option<&D> {
         self.data
             .get(&TypeId::of::<D>())
             .and_then(|b| b.downcast_ref::<D>())
@@ -153,13 +169,13 @@ mod tests {
 
     #[test]
     fn setting_the_status() {
-        assert_serialized(FcgiContext::default().with_status(400), "Status: 400\n\n");
+        assert_serialized(FcgiContext::new().with_status(400), "Status: 400\n\n");
     }
 
     #[test]
     fn setting_the_location() {
         assert_serialized(
-            FcgiContext::default().with_location("/path"),
+            FcgiContext::new().with_location("/path"),
             "Location: /path\n\n",
         )
     }
@@ -167,31 +183,31 @@ mod tests {
     #[test]
     fn setting_redirects() {
         assert_serialized(
-            FcgiContext::default().with_temporary_redirect("/path"),
+            FcgiContext::new().with_temporary_redirect("/path"),
             "Location: /path\nStatus: 307\n\n",
         );
         assert_serialized(
-            FcgiContext::default().with_permanent_redirect("/path"),
+            FcgiContext::new().with_permanent_redirect("/path"),
             "Location: /path\nStatus: 308\n\n",
         );
     }
     #[test]
     fn setting_the_content_type() {
         assert_serialized(
-            FcgiContext::default().with_content_type("text/pre"),
+            FcgiContext::new().with_content_type("text/pre"),
             "Content-Type: text/pre\n\n",
         );
     }
 
     #[test]
     fn setting_body() {
-        assert_serialized(FcgiContext::default().with_body("hello"), "\nhello")
+        assert_serialized(FcgiContext::new().with_body("hello"), "\nhello")
     }
 
     #[test]
     fn setting_html_body() {
         assert_serialized(
-            FcgiContext::default().with_html_body("<div></div>"),
+            FcgiContext::new().with_html_body("<div></div>"),
             "Content-Type: text/html\n\n<div></div>",
         )
     }
@@ -199,7 +215,7 @@ mod tests {
     #[test]
     fn setting_json_body() {
         assert_serialized(
-            FcgiContext::default().with_json_body("{}"),
+            FcgiContext::new().with_json_body("{}"),
             "Content-Type: application/json\n\n{}",
         );
     }

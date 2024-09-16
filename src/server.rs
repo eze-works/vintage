@@ -330,11 +330,11 @@ where
             query,
             incoming_headers,
             incoming_body: stdin.take(),
-            ..FcgiContext::default()
+            ..FcgiContext::new()
         };
 
         let response =
-            handler(context).unwrap_or(FcgiContext::default().with_status(status::NOT_FOUND));
+            handler(context).unwrap_or(FcgiContext::new().with_status(status::NOT_FOUND));
 
         let mut stdout = Stdout(vec![]);
         let _ = response.write_stdout_bytes(&mut stdout.0);

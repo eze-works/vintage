@@ -151,8 +151,8 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx).unwrap();
-        assert_matches!(result.get_data::<MethodPipeExecuted>(), Some(_));
-        assert_matches!(result.get_data::<PathPipeExecuted>(), Some(_));
+        assert_matches!(result.data::<MethodPipeExecuted>(), Some(_));
+        assert_matches!(result.data::<PathPipeExecuted>(), Some(_));
     }
 
     #[test]
@@ -170,8 +170,8 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx).unwrap();
-        assert_matches!(result.get_data::<MethodPipeExecuted>(), Some(_));
-        assert_matches!(result.get_data::<PathPipeExecuted>(), None);
+        assert_matches!(result.data::<MethodPipeExecuted>(), Some(_));
+        assert_matches!(result.data::<PathPipeExecuted>(), None);
 
         // First fails, second succeeds
         let ctx = FcgiContext {
@@ -179,7 +179,7 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx).unwrap();
-        assert_matches!(result.get_data::<MethodPipeExecuted>(), None);
-        assert_matches!(result.get_data::<PathPipeExecuted>(), Some(_));
+        assert_matches!(result.data::<MethodPipeExecuted>(), None);
+        assert_matches!(result.data::<PathPipeExecuted>(), Some(_));
     }
 }
