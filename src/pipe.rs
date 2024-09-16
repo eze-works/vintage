@@ -1,17 +1,11 @@
 //! Composing FastCGI requests
 //!
 //! You can view the handling of a FastCGI request as pipeline, or sequence of steps.
-//! Each step may modify the `Response`.
-//! Crucially, steps have the option of either forwarding their modified `Response` to the next step, or
-//! "breaking off" with their response, thus preventing subsequent steps from being run.
+//! Each step may either modify and return the [request context](crate::fcgi_context::FcgiContext), or fail.
+//! The `Pipe` trait encapsulates this behavior.
 //!
-//! The `Pipe` trait encapsulates this behavior through.
-//!
-//! `Pipe`s get access to combinatorial methods that make it easy to create non-trivial request
-//! pipelines.
-//!
-//! You are not limited to the pipes defined in this module though, as it is easy to implement
-//! your own. See the [`Pipe`] trait docs for details.
+//! You are not limited to the pipes defined in this module as it is easy to implement your own.
+//! See the [`Pipe`] trait docs for details.
 mod file_server;
 mod router;
 
@@ -25,21 +19,19 @@ pub use router::Router;
 ///
 /// # Implementing the trait
 ///
-/// The logic that should be executed during a request should be placed in the `run()` method.
-/// It takes a shared `&self` receiver because there will usually be one copy of the `Pipe` shared
+/// The logic to be executed during a request should be placed in the `run()` method.
+/// Returning `None` from this function means the pipe failed.
+/// The function takes a shared `&self` receiver because there will usually be one copy of the `Pipe` shared
 /// among connection-handling threads.
-///
-/// By default, the next pipe configured pipe will run, unless the
-/// [`FcgiContext::halt()`](crate::FcgiContext::halt) is called, which short-circuits the pipeline.
 pub trait Pipe: Sized {
     /// Runs the pipe logic.
-    /// Pipes can indicate failure by calling  [`.halt()`] and returning the resulting context.
-    fn run(&self, ctx: FcgiContext) -> FcgiContext;
+    /// Pipes indicate failure by returning `None`.
+    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext>;
 
     /// Expresses a sequence of pipes
     ///
     /// Returns a new pipe that will run this pipe and the `other` pipe in sequence, providing the result of running this pipe as arguments to the `other` pipe.
-    /// If this pipe halts, the `other` pipe does not run.
+    /// If this pipe fails, the `other` pipe does not run.
     fn and<P: Pipe>(self, other: P) -> And<Self, P> {
         And {
             first: self,
@@ -50,7 +42,7 @@ pub trait Pipe: Sized {
     /// Expresses an alternate pipe
     ///
     /// Returns a new pipe that will return the result of running this pipe.
-    /// If this pipe halts, the other pipe is tried with the original context.
+    /// If this pipe fails, the other pipe is tried.
     fn or<P: Pipe>(self, other: P) -> Or<Self, P> {
         Or {
             first: self,
@@ -76,13 +68,8 @@ where
     P1: Pipe,
     P2: Pipe,
 {
-    fn run(&self, ctx: FcgiContext) -> FcgiContext {
-        let result = self.first.run(ctx);
-        if result.halted {
-            result
-        } else {
-            self.second.run(result)
-        }
+    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
+        self.second.run(self.first.run(ctx)?)
     }
 }
 
@@ -91,15 +78,12 @@ where
     P1: Pipe,
     P2: Pipe,
 {
-    fn run(&self, ctx: FcgiContext) -> FcgiContext {
+    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
         let cloned = ctx.clone();
-        let result = self.first.run(cloned);
-
-        if result.halted {
-            self.second.run(ctx)
-        } else {
-            result
+        if let Some(result) = self.first.run(cloned) {
+            return Some(result);
         }
+        self.second.run(ctx)
     }
 }
 
@@ -117,21 +101,21 @@ mod tests {
     struct PathPipe;
 
     impl Pipe for MethodPipe {
-        fn run(&self, ctx: FcgiContext) -> FcgiContext {
+        fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
             if ctx.method() == "GET" {
-                ctx.with_data("Method", "true")
+                Some(ctx.with_data("Method", "true"))
             } else {
-                ctx.halt()
+                None
             }
         }
     }
 
     impl Pipe for PathPipe {
-        fn run(&self, ctx: FcgiContext) -> FcgiContext {
+        fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
             if ctx.path() == "/path" {
-                ctx.with_data("Path", "true")
+                Some(ctx.with_data("Path", "true"))
             } else {
-                ctx.halt()
+                None
             }
         }
     }
@@ -143,9 +127,7 @@ mod tests {
         // Both fail.
         let ctx = FcgiContext::default();
         let result = pipe.run(ctx);
-        assert!(result.is_halted());
-        assert_eq!(result.get_data("Method"), None);
-        assert_eq!(result.get_data("Path"), None);
+        assert!(result.is_none());
 
         // First succeeds, second fails
         let ctx = FcgiContext {
@@ -153,9 +135,7 @@ mod tests {
             ..FcgiContext::default()
         };
         let result = pipe.run(ctx);
-        assert!(result.is_halted());
-        assert_eq!(result.get_data("Method"), Some("true"));
-        assert_eq!(result.get_data("Path"), None);
+        assert!(result.is_none());
 
         // Both succeed
         let ctx = FcgiContext {
@@ -163,8 +143,7 @@ mod tests {
             path: "/path".into(),
             ..FcgiContext::default()
         };
-        let result = pipe.run(ctx);
-        assert!(!result.is_halted());
+        let result = pipe.run(ctx).unwrap();
         assert_eq!(result.get_data("Method"), Some("true"));
         assert_eq!(result.get_data("Path"), Some("true"));
     }
@@ -176,17 +155,14 @@ mod tests {
         // Both fail
         let ctx = FcgiContext::default();
         let result = pipe.run(ctx);
-        assert!(result.is_halted());
-        assert_eq!(result.get_data("Method"), None);
-        assert_eq!(result.get_data("Path"), None);
+        assert!(result.is_none());
 
         // First succeeds, second does not get run
         let ctx = FcgiContext {
             method: "GET".into(),
             ..FcgiContext::default()
         };
-        let result = pipe.run(ctx);
-        assert!(!result.is_halted());
+        let result = pipe.run(ctx).unwrap();
         assert_eq!(result.get_data("Method"), Some("true"));
         assert_eq!(result.get_data("Path"), None);
 
@@ -195,8 +171,7 @@ mod tests {
             path: "/path".into(),
             ..FcgiContext::default()
         };
-        let result = pipe.run(ctx);
-        assert!(!result.is_halted());
+        let result = pipe.run(ctx).unwrap();
         assert_eq!(result.get_data("Method"), None);
         assert_eq!(result.get_data("Path"), Some("true"));
     }

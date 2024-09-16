@@ -2,6 +2,7 @@ use crate::connection::Connection;
 use crate::error::Error;
 use crate::fcgi_context::FcgiContext;
 use crate::record::*;
+use crate::status;
 use convert_case::{Case, Casing};
 use mio::event::Events;
 use mio::net::TcpListener;
@@ -52,7 +53,7 @@ pub fn start<A, F>(addr: A, handler: F) -> Result<ServerHandle, io::Error>
 where
     A: ToSocketAddrs,
     F: 'static + Sync + Send,
-    F: Fn(FcgiContext) -> FcgiContext,
+    F: Fn(FcgiContext) -> Option<FcgiContext>,
 {
     // One of the requirements is that the user of the library be able to shutdown the server
     // gracefully. This means that there should be some way for the user to say "finish all
@@ -172,7 +173,7 @@ impl ServerHandle {
 impl<F> Server<F>
 where
     F: 'static + Sync + Send,
-    F: Fn(FcgiContext) -> FcgiContext,
+    F: Fn(FcgiContext) -> Option<FcgiContext>,
 {
     fn server_loop(mut self) -> ServerExitReason {
         // `shutdown_threadpool` should always be called before exiting this function, regardless of
@@ -332,7 +333,8 @@ where
             ..FcgiContext::default()
         };
 
-        let response = handler(context);
+        let response =
+            handler(context).unwrap_or(FcgiContext::default().with_status(status::NOT_FOUND));
 
         let mut stdout = Stdout(vec![]);
         let _ = response.write_stdout_bytes(&mut stdout.0);
@@ -433,7 +435,7 @@ mod tests {
 
     #[test]
     fn get_values() {
-        let server = start("localhost:0", |ctx| ctx).unwrap();
+        let server = start("localhost:0", |_| None).unwrap();
 
         assert_request(
             server.address(),
@@ -458,7 +460,7 @@ mod tests {
 
     #[test]
     fn unsupported_keepalive() {
-        let server = start("localhost:0", |ctx| ctx).unwrap();
+        let server = start("localhost:0", |_| None).unwrap();
 
         assert_request(
             server.address(),
@@ -478,7 +480,7 @@ mod tests {
         // A server that echoes the body
         let server = start("localhost:0", |ctx| {
             let body = ctx.body().to_vec();
-            ctx.with_raw_body(body)
+            Some(ctx.with_raw_body(body))
         })
         .unwrap();
 

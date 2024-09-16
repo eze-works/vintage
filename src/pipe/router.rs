@@ -1,6 +1,5 @@
 use crate::fcgi_context::FcgiContext;
 use crate::pipe::Pipe;
-use crate::status;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -9,23 +8,9 @@ type RouterCallback = Arc<dyn Fn(FcgiContext, RouteParams) -> FcgiContext + Send
 type NotFoundCallback = Box<dyn Fn(FcgiContext) -> FcgiContext + Send + Sync>;
 
 /// A [`Pipe`] for dispatching handlers based on request method and path
+#[derive(Default)]
 pub struct Router {
     map: BTreeMap<&'static str, matchit::Router<RouterCallback>>,
-    not_found_callback: NotFoundCallback,
-}
-
-impl Default for Router {
-    fn default() -> Self {
-        Self {
-            map: BTreeMap::new(),
-            not_found_callback: Box::new(|_| {
-                FcgiContext::default()
-                    .halt()
-                    .with_raw_body(vec![])
-                    .with_status(status::NOT_FOUND)
-            }),
-        }
-    }
 }
 
 impl Router {
@@ -88,18 +73,6 @@ impl Router {
         self
     }
 
-    /// Registers a callback to handle requests that result in a 404
-    ///
-    /// By default, the router will just send an empty response with a status code of 404
-    pub fn not_found<C>(mut self, callback: C) -> Self
-    where
-        C: Fn(FcgiContext) -> FcgiContext,
-        C: 'static + Send + Sync,
-    {
-        self.not_found_callback = Box::new(callback);
-        self
-    }
-
     /// Registers a path for the "GET" method
     ///
     /// See [`Router::register`]
@@ -146,14 +119,10 @@ impl Router {
 }
 
 impl Pipe for Router {
-    fn run(&self, ctx: FcgiContext) -> FcgiContext {
-        let Some(router) = self.map.get(ctx.method()) else {
-            return (self.not_found_callback)(ctx.halt());
-        };
+    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
+        let router = self.map.get(ctx.method())?;
 
-        let Ok(entry) = router.at(ctx.path()) else {
-            return (self.not_found_callback)(ctx.halt());
-        };
+        let entry = router.at(ctx.path()).ok()?;
 
         let mut params = BTreeMap::new();
 
@@ -161,7 +130,7 @@ impl Pipe for Router {
             params.insert(key.to_string(), value.to_string());
         }
 
-        (entry.value)(ctx, params)
+        Some((entry.value)(ctx, params))
     }
 }
 
@@ -239,25 +208,6 @@ mod test {
         });
 
         let request = make_context("GET", "/path/2/rest");
-
-        let _ = router.run(request);
-
-        assert_eq!(called.load(Ordering::SeqCst), true);
-    }
-
-    #[test]
-    fn not_found() {
-        let called = Arc::new(AtomicBool::new(false));
-
-        let router = Router::new().not_found({
-            let called = called.clone();
-            move |ctx| {
-                called.store(true, Ordering::SeqCst);
-                ctx
-            }
-        });
-
-        let request = make_context("GET", "/wut");
 
         let _ = router.run(request);
 

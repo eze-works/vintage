@@ -11,8 +11,8 @@
 //!  use vintage::start;
 //!
 //!  fn main() {
-//!      let server = start("localhost:8000", |ctx| {
-//!          ctx.with_body("<h1>Hello World</h1>")
+//!      let server = start("localhost:0", |ctx| {
+//!          Some(ctx.with_body("<h1>Hello World</h1>"))
 //!      }).unwrap();
 //!      
 //!      // This would block the current thread until the server thread exits
@@ -26,10 +26,34 @@
 //!  The [`start`] function accepts two arguments:
 //!  - The address on which the server should listen.
 //!  - A function to handle FastCGI requests.
-//!    It is passed a single [`FcgiContext`] argument, and must return an value of the same type.
+//!    Perhapse surprisingly, the return type of this function is `Option<FcgiContext>` instead of
+//!    just [`FcgiContext`].
+//!    This is intentional and fits nicely with the rest of the library.
+//!    Returning `None` causes the server to respond with an empty 404.
 //!
-//! The crate also provides an optional layer called [`pipe`]s to help compose request processing
-//! together.
+//! For less trivial request handling, this crate offers [`pipe`]s, a combinatorial approach to
+//! chaining "middleware" together.
+//!
+//! In the following example, we setup a static file server for paths begining with `/assets`,
+//! and a router for the `/about` path.
+//! We then combine them using `or`, which yields a pipeline that tries to resolve the request path as
+//! a static file.
+//! If that fails, it will try finding a relevant callback using the router.
+//! If that fails, the server just returns a 404 because the result of the pipeline will be `None`.
+//!
+//!
+//! ```
+//! use vintage::start;
+//! use vintage::pipe::{self, Pipe};
+//!
+//! let router = pipe::Router::new().get(["/about"], |ctx, _| ctx);
+//! let static_files = pipe::FileServer::new("/assets", "/var/www");
+//! let pipeline = static_files.or(router);
+//!
+//! let server = start("localhost:0", move |ctx| pipeline.run(ctx)).unwrap();
+//! server.stop();
+//! ```
+//!
 //!
 //! # Terminology:
 //!

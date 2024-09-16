@@ -1,5 +1,6 @@
 use super::Pipe;
 use crate::status;
+use crate::FcgiContext;
 use camino::Utf8PathBuf;
 use filetime::FileTime;
 use std::fs;
@@ -91,14 +92,14 @@ impl FileServer {
 }
 
 impl Pipe for FileServer {
-    fn run(&self, mut ctx: crate::FcgiContext) -> crate::FcgiContext {
+    fn run(&self, mut ctx: FcgiContext) -> Option<FcgiContext> {
         if ctx.method() != "GET" {
-            return ctx.halt().with_status(status::NOT_FOUND);
+            return None;
         }
 
         let (path, mtime) = match self.resolve_path(ctx.path()) {
             ResolveResult::NotFound | ResolveResult::Ignore => {
-                return ctx.halt().with_status(status::NOT_FOUND)
+                return None;
             }
             ResolveResult::Found(p, m) => (p, m),
         };
@@ -136,21 +137,23 @@ impl Pipe for FileServer {
             // If-None-Match: *
 
             if request_etag.contains(&current_etag_value) {
-                return ctx.with_status(status::NOT_MODIFIED);
+                return Some(ctx.with_status(status::NOT_MODIFIED));
             }
         }
 
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
-            Err(_) => return ctx.halt().with_status(status::NOT_FOUND),
+            Err(_) => return None,
         };
 
         let extension = path.extension();
         let content_type = extension_to_mime_impl(extension);
 
-        ctx.with_status(status::OK)
-            .with_content_type(content_type)
-            .with_raw_body(bytes)
+        Some(
+            ctx.with_status(status::OK)
+                .with_content_type(content_type)
+                .with_raw_body(bytes),
+        )
     }
 }
 

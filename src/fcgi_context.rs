@@ -1,10 +1,11 @@
+use crate::pipe::Pipe;
 use crate::status;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 /// Encapsulates all information about an individual FastCGI request and response.
 ///
-/// A [`Pipe`](crate::pipe::Pipe) may also use this structure to [store](FcgiContext::add_data) data
+/// A [`Pipe`](crate::pipe::Pipe) may also use this structure to [store](FcgiContext::with_data) data
 /// to be used in later stages of the pipeline.
 #[derive(Debug, Clone, Default)]
 pub struct FcgiContext {
@@ -16,7 +17,6 @@ pub struct FcgiContext {
     pub(crate) outgoing_headers: BTreeMap<String, String>,
     pub(crate) outgoing_body: Vec<u8>,
     pub(crate) data: BTreeMap<&'static str, String>,
-    pub(crate) halted: bool,
 }
 
 impl FcgiContext {
@@ -53,17 +53,6 @@ impl FcgiContext {
     /// Returns the request body.
     pub fn body(&self) -> &[u8] {
         self.incoming_body.as_slice()
-    }
-
-    /// Returns a new context that will short-circuit the current pipeline.
-    pub fn halt(mut self) -> Self {
-        self.halted = true;
-        self
-    }
-
-    /// Returns `true` if this pipe has been halted
-    pub fn is_halted(&self) -> bool {
-        self.halted
     }
 
     /// Returns a new context with the response `Content-Type` header set
@@ -150,6 +139,13 @@ impl FcgiContext {
         }
         writeln!(writer)?;
         writer.write_all(&self.outgoing_body)
+    }
+}
+
+impl Pipe for FcgiContext {
+    /// A context implements [`Pipe`] by returning itself.
+    fn run(&self, _ctx: FcgiContext) -> Option<FcgiContext> {
+        Some(self.clone())
     }
 }
 
