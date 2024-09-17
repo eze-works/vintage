@@ -18,6 +18,7 @@ pub struct FcgiContext {
     pub(crate) incoming_body: Vec<u8>,
     pub(crate) outgoing_headers: BTreeMap<String, String>,
     pub(crate) outgoing_body: Vec<u8>,
+    pub(crate) outgoing_status: u16,
     pub(crate) data: BTreeMap<TypeId, Rc<dyn Any>>,
     pub(crate) created_at: Instant,
 }
@@ -32,6 +33,7 @@ impl FcgiContext {
             incoming_body: Vec::new(),
             outgoing_headers: BTreeMap::new(),
             outgoing_body: Vec::new(),
+            outgoing_status: status::OK,
             data: BTreeMap::new(),
             created_at: Instant::now(),
         }
@@ -42,6 +44,11 @@ impl FcgiContext {
         self.data
             .get(&TypeId::of::<D>())
             .and_then(|b| b.downcast_ref::<D>())
+    }
+
+    /// Returns the instant this context was created
+    pub fn created_at(&self) -> Instant {
+        self.created_at
     }
 
     /// Returns the request method
@@ -75,8 +82,9 @@ impl FcgiContext {
     }
 
     /// Returns a new context with the response status set
-    pub fn with_status(self, code: u16) -> Self {
-        self.with_header("Status", code.to_string())
+    pub fn with_status(mut self, code: u16) -> Self {
+        self.outgoing_status = code;
+        self
     }
 
     /// Returns a new context with the location response header set
@@ -151,6 +159,7 @@ impl FcgiContext {
         for (key, value) in self.outgoing_headers.iter() {
             writeln!(writer, "{key}: {value}")?;
         }
+        writeln!(writer, "Status: {}", self.outgoing_status)?;
         writeln!(writer)?;
         writer.write_all(&self.outgoing_body)
     }
@@ -176,7 +185,7 @@ mod tests {
     fn setting_the_location() {
         assert_serialized(
             FcgiContext::new().with_location("/path"),
-            "Location: /path\n\n",
+            "Location: /path\nStatus: 200\n\n",
         )
     }
 
@@ -195,20 +204,23 @@ mod tests {
     fn setting_the_content_type() {
         assert_serialized(
             FcgiContext::new().with_content_type("text/pre"),
-            "Content-Type: text/pre\n\n",
+            "Content-Type: text/pre\nStatus: 200\n\n",
         );
     }
 
     #[test]
     fn setting_body() {
-        assert_serialized(FcgiContext::new().with_body("hello"), "\nhello")
+        assert_serialized(
+            FcgiContext::new().with_body("hello"),
+            "Status: 200\n\nhello",
+        )
     }
 
     #[test]
     fn setting_html_body() {
         assert_serialized(
             FcgiContext::new().with_html_body("<div></div>"),
-            "Content-Type: text/html\n\n<div></div>",
+            "Content-Type: text/html\nStatus: 200\n\n<div></div>",
         )
     }
 
@@ -216,7 +228,7 @@ mod tests {
     fn setting_json_body() {
         assert_serialized(
             FcgiContext::new().with_json_body("{}"),
-            "Content-Type: application/json\n\n{}",
+            "Content-Type: application/json\nStatus: 200\n\n{}",
         );
     }
 }

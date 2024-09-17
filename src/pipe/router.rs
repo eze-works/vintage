@@ -144,7 +144,7 @@ mod test {
         FcgiContext {
             method: method.into(),
             path: path.into(),
-            ..FcgiContext::default()
+            ..FcgiContext::new()
         }
     }
 

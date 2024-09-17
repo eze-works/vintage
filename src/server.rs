@@ -492,7 +492,7 @@ mod tests {
                 Stdin(b"BAR".to_vec())
             },
             records! {
-                Stdout(b"\nBAR".to_vec()),
+                Stdout(b"Status: 200\n\nBAR".to_vec()),
                 EndRequest::new(0, ProtocolStatus::RequestComplete)
             },
         );

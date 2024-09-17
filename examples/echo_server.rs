@@ -2,6 +2,7 @@ use vintage::pipe::{self, Pipe};
 use vintage::start;
 
 fn main() {
+    env_logger::init();
     let fallback =
         pipe::custom(move |ctx| Some(ctx.with_html_body("<h1>Not Found</h1>").with_status(404)));
 
@@ -14,7 +15,8 @@ fn main() {
             ctx.with_html_body("<h1>Hello World</h1>").with_status(200)
         });
 
-    let pipeline = router.or(fallback);
+    let logger = pipe::Logger::new("got request");
+    let pipeline = pipe::optional(router.or(fallback)).and(logger);
     let server = start("localhost:8000", move |ctx| pipeline.run(ctx)).unwrap();
 
     server.join();
