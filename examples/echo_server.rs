@@ -17,7 +17,7 @@ fn main() {
 
     let logger = pipe::Logger::new("got request");
     let pipeline = pipe::optional(router.or(fallback)).and(logger);
-    let server = start("localhost:8000", move |ctx| pipeline.run(ctx)).unwrap();
+    let server = start("localhost:8000", move |ctx| pipeline.apply(ctx)).unwrap();
 
     server.join();
 }

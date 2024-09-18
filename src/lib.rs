@@ -97,12 +97,15 @@
 
 #![allow(dead_code)]
 mod connection;
+mod context;
 mod error;
 mod fcgi_context;
-pub mod pipe;
 mod record;
 mod server;
+mod server_spec;
 pub mod status;
 
+pub use context::{Request, Response};
 pub use fcgi_context::FcgiContext;
-pub use server::{start, ServerExitReason, ServerHandle};
+pub use server::{ServerExitReason, ServerHandle};
+pub use server_spec::ServerSpec;

@@ -20,7 +20,7 @@ impl<F> Pipe for Custom<F>
 where
     F: Fn(FcgiContext) -> Option<FcgiContext>,
 {
-    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
+    fn apply(&self, ctx: FcgiContext) -> Option<FcgiContext> {
         (self.callback)(ctx)
     }
 }

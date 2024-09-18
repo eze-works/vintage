@@ -3,6 +3,7 @@ use crate::error::Error;
 use crate::fcgi_context::FcgiContext;
 use crate::record::*;
 use crate::status;
+use crate::{Context, Request, Response};
 use convert_case::{Case, Casing};
 use mio::event::Events;
 use mio::net::TcpListener;
@@ -13,6 +14,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
+use crate::pipe::Pipe;
 
 /// Handle to a running FastCGI server
 pub struct ServerHandle {
@@ -36,7 +38,7 @@ pub enum ServerExitReason {
 
 struct Server<F> {
     socket: TcpListener,
-    handler: Arc<F>,
+    pipeline: Arc<F>,
     poll: Poll,
     events: Events,
     signal_shutdown: SyncSender<()>,
@@ -49,11 +51,10 @@ const SHUTDOWN: Token = Token(1);
 /// Starts a new FastCGI server bound to the specified address, and returns a handle.
 ///
 /// This function does not block. The FastCGI server is created on a separate thread.
-pub fn start<A, F>(addr: A, handler: F) -> Result<ServerHandle, io::Error>
+pub fn start<A, P>(addr: A, pipeline: P) -> Result<ServerHandle, io::Error>
 where
     A: ToSocketAddrs,
-    F: 'static + Sync + Send,
-    F: Fn(FcgiContext) -> Option<FcgiContext>,
+    P: Pipe + Sync + Send,
 {
     // One of the requirements is that the user of the library be able to shutdown the server
     // gracefully. This means that there should be some way for the user to say "finish all
@@ -108,7 +109,7 @@ where
 
     let server = Server {
         socket,
-        handler: Arc::new(handler),
+        pipeline: Arc::new(pipeline),
         poll,
         events,
         signal_shutdown,
@@ -170,10 +171,9 @@ impl ServerHandle {
     }
 }
 
-impl<F> Server<F>
+impl<P> Server<P>
 where
-    F: 'static + Sync + Send,
-    F: Fn(FcgiContext) -> Option<FcgiContext>,
+    P: Pipe + Sync + Send,
 {
     fn server_loop(mut self) -> ServerExitReason {
         // `shutdown_threadpool` should always be called before exiting this function, regardless of
@@ -200,9 +200,9 @@ where
                                     Ok(c) => c,
                                     Err(err) => return ServerExitReason::Err(err),
                                 };
-                                let handler = self.handler.clone();
+                                let pipeline = self.pipeline.clone();
                                 pool.execute(move || {
-                                    Self::fast_cgi(connection, handler);
+                                    Self::fast_cgi(connection, pipeline);
                                 });
                             }
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -248,7 +248,7 @@ where
     // There are two expected flows;
     // + We receive a `GetValues` request to which we respond.
     // + We receive a `BeginRequest` request followed by Params and Stdin. Respond using Stdout followed by EndRequest
-    fn fast_cgi(mut conn: Connection, handler: Arc<F>) {
+    fn fast_cgi(mut conn: Connection, pipeline: Arc<P>) {
         let first_record = match conn.read_record() {
             Ok(r) => r,
             Err(e) => {
@@ -312,29 +312,29 @@ where
             return;
         };
 
-        let mut incoming_headers = BTreeMap::new();
+        let mut headers = BTreeMap::new();
         for (k, v) in vars {
             if let Some(suffix) = k.strip_prefix("HTTP_") {
-                incoming_headers.insert(suffix.to_case(Case::Train), v);
+                headers.insert(suffix.to_case(Case::Train), v);
             }
         }
 
-        let mut query = BTreeMap::new();
-        for (k, v) in form_urlencoded::parse(query_string.as_bytes()) {
-            query.insert(k.to_string(), v.to_string());
-        }
-
-        let context = FcgiContext {
+        let request = Request {
             method,
             path,
-            query,
-            incoming_headers,
-            incoming_body: stdin.take(),
-            ..FcgiContext::new()
+            query_string,
+            headers,
+            body: stdin.take(),
+            ..Request::default()
         };
 
+        let context = Context {
+            request,
+            ..Context::default(),
+        }
+
         let response =
-            handler(context).unwrap_or(FcgiContext::new().with_status(status::NOT_FOUND));
+            pipeline(context).unwrap_or(FcgiContext::new().with_status(status::NOT_FOUND));
 
         let mut stdout = Stdout(vec![]);
         let _ = response.write_stdout_bytes(&mut stdout.0);

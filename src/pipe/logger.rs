@@ -13,7 +13,7 @@ impl Logger {
 }
 
 impl Pipe for Logger {
-    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
+    fn apply(&self, ctx: FcgiContext) -> Option<FcgiContext> {
         let elapsed = ctx.created_at().elapsed();
 
         log::info!(

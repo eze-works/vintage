@@ -119,7 +119,7 @@ impl Router {
 }
 
 impl Pipe for Router {
-    fn run(&self, ctx: FcgiContext) -> Option<FcgiContext> {
+    fn apply(&self, ctx: FcgiContext) -> Option<FcgiContext> {
         let router = self.map.get(ctx.method())?;
 
         let entry = router.at(ctx.path()).ok()?;
@@ -167,8 +167,8 @@ mod test {
         let request1 = make_context("GET", "/path");
         let request2 = make_context("GET", "/path/");
 
-        let _ = router.run(request1);
-        let _ = router.run(request2);
+        let _ = router.apply(request1);
+        let _ = router.apply(request2);
 
         assert_eq!(called.load(Ordering::SeqCst), true);
         assert_eq!(counter.load(Ordering::SeqCst), 2);
@@ -189,7 +189,7 @@ mod test {
 
         let request = make_context("GET", "/path/a/b/c");
 
-        let _ = router.run(request);
+        let _ = router.apply(request);
 
         assert_eq!(called.load(Ordering::SeqCst), true);
     }
@@ -209,7 +209,7 @@ mod test {
 
         let request = make_context("GET", "/path/2/rest");
 
-        let _ = router.run(request);
+        let _ = router.apply(request);
 
         assert_eq!(called.load(Ordering::SeqCst), true);
     }

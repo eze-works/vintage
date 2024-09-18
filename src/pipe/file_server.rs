@@ -1,4 +1,5 @@
-use super::Pipe;
+use super::{Pipe, PipeResult};
+use crate::context::Context;
 use crate::status;
 use crate::FcgiContext;
 use camino::Utf8PathBuf;
@@ -92,14 +93,14 @@ impl FileServer {
 }
 
 impl Pipe for FileServer {
-    fn run(&self, mut ctx: FcgiContext) -> Option<FcgiContext> {
-        if ctx.method() != "GET" {
-            return None;
+    fn run(&self, ctx: &mut Context) -> bool {
+        if ctx.request.method != "GET" {
+            return false;
         }
 
         let (path, mtime) = match self.resolve_path(ctx.path()) {
             ResolveResult::NotFound | ResolveResult::Ignore => {
-                return None;
+                return false;
             }
             ResolveResult::Found(p, m) => (p, m),
         };
@@ -120,30 +121,32 @@ impl Pipe for FileServer {
         // Source: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching#etagif-none-match
         // The filetime as unix seconds is used as the etag
         let current_etag_value = format!("\"{}\"", mtime);
-        ctx = ctx
-            .with_header("Cache-Control", "no-cache")
-            .with_header("ETag", &current_etag_value);
+
+        ctx.response
+            .set_header("Cache-Control", "no-cache")
+            .set_header"ETag", &current_etag_value);
 
         if let Ok(mtime) = jiff::Timestamp::from_second(mtime) {
             // e.g. Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT
             let last_modified = mtime.strftime("%a, %d %b %Y %H:%M:%S GMT");
-            ctx = ctx.with_header("Last-Modified", last_modified.to_string());
+            ctx.set_header("Last-Modified", last_modified.to_string());
         }
 
-        if let Some(request_etag) = ctx.get_header("If-None-Match") {
+        if let Some(request_etag) = ctx.request.headers.get("If-None-Match") {
             // This header can look like:
             // If-None-Match: "<etag_value>"
             // If-None-Match: "<etag_value>", "<etag_value>", …
             // If-None-Match: *
 
             if request_etag.contains(&current_etag_value) {
-                return Some(ctx.with_status(status::NOT_MODIFIED));
+                ctx.response.set_status(status::NOT_MODIFIED);
+                return true;
             }
         }
 
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
-            Err(_) => return None,
+            Err(_) => return false,
         };
 
         let extension = path.extension();
