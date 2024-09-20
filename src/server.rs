@@ -1,36 +1,20 @@
 mod event_loop;
-mod files;
 mod responder;
-mod router;
 
 use crate::context::{Request, Response};
-use camino::Utf8PathBuf;
-use std::collections::BTreeMap;
+use crate::file_server::FileServer;
+use crate::router::{RouteParams, Router};
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-type RouteParams = BTreeMap<String, String>;
-type RouterCallback = Arc<dyn Fn(&mut Request, RouteParams) -> Response + Send + Sync>;
-
-#[derive(Default, Clone)]
-struct RouterSpec {
-    map: BTreeMap<&'static str, matchit::Router<RouterCallback>>,
-}
-
-#[derive(Clone)]
-struct FileServerSpec {
-    request_prefix: String,
-    fs_path: Utf8PathBuf,
-}
-
-/// Configuration of `vintage` FastCGI Server
+/// Configuration for a `vintage` FastCGI Server
 #[derive(Clone)]
 pub struct ServerSpec {
-    file_server: Option<FileServerSpec>,
-    router: Option<RouterSpec>,
+    file_server: Option<FileServer>,
+    router: Option<Router>,
     fallback: Option<Arc<dyn Fn(&mut Request) -> Response + Send + Sync>>,
 }
 
@@ -71,26 +55,7 @@ impl ServerSpec {
     ///
     /// Panics if `path` contains invalid utf8 values
     pub fn serve_files(mut self, prefix: &'static str, path: &'static str) -> Self {
-        let request_prefix = if prefix.starts_with('/') {
-            prefix.to_string()
-        } else {
-            format!("/{}", prefix)
-        };
-
-        let fs_path = if path.trim().is_empty() {
-            Utf8PathBuf::from(".")
-        } else {
-            Utf8PathBuf::from(path)
-        };
-
-        // TODO: Log a warning if `fs_path` does not exist
-
-        let spec = FileServerSpec {
-            request_prefix,
-            fs_path,
-        };
-
-        self.file_server = Some(spec);
+        self.file_server = Some(FileServer::new(prefix, path));
         self
     }
 
@@ -150,16 +115,9 @@ impl ServerSpec {
         C: Fn(&mut Request, RouteParams) -> Response,
         C: 'static + Send + Sync,
     {
-        let callback = Arc::new(callback);
-        let mut spec = self.router.unwrap_or_default();
-        for path in paths {
-            spec.map
-                .entry(method)
-                .or_default()
-                .insert(path, callback.clone())
-                .unwrap()
-        }
-        self.router = Some(spec);
+        let mut router = self.router.unwrap_or_default();
+        router.register(method, paths, callback);
+        self.router = Some(router);
         self
     }
 
@@ -282,5 +240,127 @@ impl ServerHandle {
     /// Returns the address at which the server is currently listening
     pub fn address(&self) -> SocketAddr {
         self.address
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::Connection;
+    use crate::error::Error;
+    use crate::record::*;
+    use assert_matches::assert_matches;
+    use mio::net::TcpStream;
+
+    macro_rules! records {
+        ($($record:expr),* $(,)?) => {{
+            #[allow(unused_mut)]
+            let mut records: Vec<Record> = vec![];
+            $(
+                records.push($record.into());
+            )*
+            records
+        }}
+    }
+
+    fn basic_params() -> Params {
+        Params::default()
+            .add("REQUEST_METHOD", "GET")
+            .add("PATH_INFO", "/")
+            .add("QUERY_STRING", "")
+    }
+
+    // Test that when we send `to_send` records to the server at `address`, we get back the
+    // `expected` records
+    #[track_caller]
+    fn assert_request(address: SocketAddr, to_send: Vec<Record>, mut expected: Vec<Record>) {
+        let socket = TcpStream::connect(address).unwrap();
+        let mut connection = Connection::try_from(socket).unwrap();
+
+        for record in to_send.iter() {
+            connection.write_record(record).unwrap();
+        }
+
+        loop {
+            if expected.is_empty() {
+                let result = connection.read_record();
+                assert_matches!(result, Err(Error::UnexpectedSocketClose(_)));
+                break;
+            }
+
+            match connection.read_record() {
+                Ok(record) => {
+                    assert_eq!(record, expected.remove(0));
+                }
+                Err(err) => panic!("{err}"),
+            }
+        }
+    }
+
+    #[test]
+    fn get_values() {
+        let server = ServerSpec::new().start("localhost:0").unwrap();
+
+        assert_request(
+            server.address(),
+            records! {
+                GetValues::default(),
+            },
+            records! {
+                GetValuesResult::default(),
+            },
+        );
+
+        assert_request(
+            server.address(),
+            records! {
+                GetValues::default().add("FCGI_MPXS_CONNS").add("VALUE_WE_DONT_KNOW"),
+            },
+            records! {
+                GetValuesResult::default().add("FCGI_MPXS_CONNS", "0"),
+            },
+        );
+    }
+
+    #[test]
+    fn unsupported_keepalive() {
+        let server = ServerSpec::new().start("localhost:0").unwrap();
+
+        assert_request(
+            server.address(),
+            records! {
+                BeginRequest::new(Role::Responder, true),
+                basic_params(),
+                Stdin(vec![])
+            },
+            records! {
+                EndRequest::new(0, ProtocolStatus::MultiplexingUnsupported)
+            },
+        );
+    }
+
+    #[test]
+    fn successful_responder_flow() {
+        // A server that echoes the body
+        let server = ServerSpec::new()
+            .unhandled(|req| {
+                let body = std::mem::take(&mut req.body);
+                Response::default().set_body(body)
+            })
+            .start("localhost:0")
+            .unwrap();
+
+        assert_request(
+            server.address(),
+            records! {
+                BeginRequest::new(Role::Responder, false),
+                basic_params(),
+                Stdin(b"BAR".to_vec())
+            },
+            records! {
+                Stdout(b"Status: 200\n\nBAR".to_vec()),
+                EndRequest::new(0, ProtocolStatus::RequestComplete)
+            },
+        );
     }
 }

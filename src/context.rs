@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::time::Instant;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub method: String,
     pub path: String,
@@ -49,7 +49,7 @@ impl Request {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     status: u16,
     headers: BTreeMap<String, String>,
@@ -68,6 +68,11 @@ impl Default for Response {
 }
 
 impl Response {
+    /// Create an empty 200 OK FastCGI response
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Sets the response header `key` to `value`
     ///
     /// If `key` was already present in the map, the value is updated

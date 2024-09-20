@@ -1,4 +1,4 @@
-use super::{files, router, ServerSpec};
+use super::ServerSpec;
 use crate::connection::Connection;
 use crate::context::{Request, Response};
 use crate::error::Error;
@@ -83,30 +83,28 @@ pub fn handle_connection(mut conn: Connection, spec: ServerSpec) {
         }
     }
 
-    let mut request = Request::default();
-    request.method = method;
-    request.path = path;
-    request.query_string = query_string;
-    request.headers = headers;
-    request.body = stdin.take();
+    let mut req = Request::default();
+    req.method = method;
+    req.path = path;
+    req.query_string = query_string;
+    req.headers = headers;
+    req.body = stdin.take();
 
     let mut response: Option<Response> = None;
 
-    if let Some(fs_spec) = spec.file_server {
-        if let Some(suffix) = request.path.strip_prefix(&fs_spec.request_prefix) {
-            response = Some(files::respond(suffix, &fs_spec.fs_path, &request));
-        }
+    if let Some(fs) = spec.file_server {
+        response = fs.respond(&req);
     };
 
     if response.is_none() {
-        if let Some(router_spec) = spec.router {
-            response = router::respond(&mut request, router_spec);
+        if let Some(router) = spec.router {
+            response = router.respond(&mut req);
         }
     }
 
     if response.is_none() {
         if let Some(fallback) = spec.fallback {
-            response = Some(fallback(&mut request));
+            response = Some(fallback(&mut req));
         }
     }
 

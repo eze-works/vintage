@@ -1,88 +1,191 @@
 use crate::context::{Request, Response};
-use crate::status;
-use camino::Utf8Path;
+use crate::status::{NOT_FOUND, NOT_MODIFIED, OK};
+use camino::Utf8PathBuf;
 use filetime::FileTime;
 use std::fs;
 
-pub fn respond(path: &str, base: &Utf8Path, req: &Request) -> Response {
-    // First, validate that the base path exists.
-    // The user could have provided a relative path.
-    let Ok(base) = base.canonicalize_utf8() else {
-        return Response::default().set_status(status::NOT_FOUND);
-    };
+#[derive(Debug, Clone)]
+pub struct FileServer {
+    request_prefix: String,
+    fs_path: Utf8PathBuf,
+}
 
-    // Create the full path: <base>/<path>
-    // For this to work though, we need to strip any leading forward slashes from `path`
-    // If we do not do this, `Path::join()` will assume it is an absolute path
-    let full_path = base.join(path.trim_start_matches('/'));
+impl FileServer {
+    pub fn new(prefix: &'static str, path: &'static str) -> Self {
+        let request_prefix = if prefix.starts_with('/') {
+            prefix.to_string()
+        } else {
+            format!("/{}", prefix)
+        };
 
-    // Ensure the path exists
-    let Ok(full_path) = full_path.canonicalize_utf8() else {
-        return Response::default().set_status(status::NOT_FOUND);
-    };
+        let fs_path = if path.trim().is_empty() {
+            Utf8PathBuf::from(".")
+        } else {
+            Utf8PathBuf::from(path)
+        };
 
-    // Ensure the canonical form still points to a directory inside `base`
-    // This prevents things like `GET ../../blah.txt`
-    if !full_path.starts_with(&base) {
-        return Response::default().set_status(status::NOT_FOUND);
-    };
+        // TODO: Log a warning if `fs_path` does not exist
 
-    // Ensure the path points to a file (and not a directory)
-    let mtime = match full_path.metadata() {
-        Ok(meta) if meta.is_file() => FileTime::from_last_modification_time(&meta).unix_seconds(),
-        _ => return Response::default().set_status(status::NOT_FOUND),
-    };
-
-    // Caching approach:
-    // + Always send `Cache-Control: no-cache`.
-    //   + This prevents clients from caching. But they'll still attempt to validate stale
-    //     responses.
-    // + Always send `ETag: "<file-modification-time>"`
-    // + Examine the `If-None-Match` header if it exists.
-    //   This is the header the browser sends when it wants to validate a stale response.
-    //   Since none of our responses are cached (i.e. stale), the browser will basically always send this.
-    //   + If the modified time of the file is the same, send 304 without the body (win!)
-    //   + If the file has changed, send 200 OK as usual
-    // + Always send `Last-Modified` as MDN says it's always useful to do so, for non-caching
-    //   reasons (e.g. crawlers)
-    //
-    // Source: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching#etagif-none-match
-    // The filetime as unix seconds is used as the etag
-
-    let current_etag_value = format!("\"{}\"", mtime);
-    let mut response = Response::default()
-        .set_header("Cache-Control", "no-cache")
-        .set_header("ETag", &current_etag_value);
-
-    if let Ok(mtime) = jiff::Timestamp::from_second(mtime) {
-        // e.g. Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT
-        let last_modified = mtime.strftime("%a, %d %b %Y %H:%M:%S GMT");
-        response = response.set_header("Last-Modified", last_modified.to_string());
-    }
-
-    if let Some(request_etag) = req.headers.get("If-None-Match") {
-        // This header can look like:
-        // If-None-Match: "<etag_value>"
-        // If-None-Match: "<etag_value>", "<etag_value>", …
-        // If-None-Match: *
-
-        if request_etag.contains(&current_etag_value) {
-            return response.set_status(status::NOT_MODIFIED);
+        Self {
+            request_prefix,
+            fs_path,
         }
     }
 
-    let bytes = match fs::read(&full_path) {
-        Ok(bytes) => bytes,
-        Err(_) => return Response::default().set_status(status::NOT_FOUND),
-    };
+    pub fn respond(&self, req: &Request) -> Option<Response> {
+        if req.method != "GET" {
+            return None;
+        }
 
-    let extension = full_path.extension();
-    let content_type = extension_to_mime_impl(extension);
+        // Ignore the request if its prefix is different from what was configured
+        let Some(path) = req.path.strip_prefix(&self.request_prefix) else {
+            return None;
+        };
 
-    response
-        .set_status(status::OK)
-        .set_header("Content-Type", content_type)
-        .set_body(bytes)
+        // First, validate that the base path exists.
+        // The user could have provided a relative path.
+        let Ok(base) = self.fs_path.canonicalize_utf8() else {
+            return Some(Response::new().set_status(NOT_FOUND));
+        };
+
+        // Create the full path: <base>/<path>
+        // For this to work though, we need to strip any leading forward slashes from `path`
+        // If we do not do this, `Path::join()` will assume it is an absolute path
+        let full_path = base.join(path.trim_start_matches('/'));
+
+        // Ensure the path exists
+        let Ok(full_path) = full_path.canonicalize_utf8() else {
+            return Some(Response::new().set_status(NOT_FOUND));
+        };
+
+        // Ensure the canonical form still points to a directory inside `base`
+        // This prevents things like `GET ../../blah.txt`
+        if !full_path.starts_with(&base) {
+            return Some(Response::new().set_status(NOT_FOUND));
+        };
+
+        // Ensure the path points to a file (and not a directory)
+        let mtime = match full_path.metadata() {
+            Ok(meta) if meta.is_file() => {
+                FileTime::from_last_modification_time(&meta).unix_seconds()
+            }
+            _ => return Some(Response::new().set_status(NOT_FOUND)),
+        };
+
+        // Caching approach:
+        // + Always send `Cache-Control: no-cache`.
+        //   + This prevents clients from caching. But they'll still attempt to validate stale
+        //     responses.
+        // + Always send `ETag: "<file-modification-time>"`
+        // + Examine the `If-None-Match` header if it exists.
+        //   This is the header the browser sends when it wants to validate a stale response.
+        //   Since none of our responses are cached (i.e. stale), the browser will basically always send this.
+        //   + If the modified time of the file is the same, send 304 without the body (win!)
+        //   + If the file has changed, send 200 OK as usual
+        // + Always send `Last-Modified` as MDN says it's always useful to do so, for non-caching
+        //   reasons (e.g. crawlers)
+        //
+        // Source: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching#etagif-none-match
+        // The filetime as unix seconds is used as the etag
+
+        let current_etag_value = format!("\"{}\"", mtime);
+        let mut res = Response::new()
+            .set_header("Cache-Control", "no-cache")
+            .set_header("ETag", &current_etag_value);
+
+        if let Ok(mtime) = jiff::Timestamp::from_second(mtime) {
+            // e.g. Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT
+            let last_modified = mtime.strftime("%a, %d %b %Y %H:%M:%S GMT");
+            res = res.set_header("Last-Modified", last_modified.to_string());
+        }
+
+        if let Some(request_etag) = req.headers.get("If-None-Match") {
+            // This header can look like:
+            // If-None-Match: "<etag_value>"
+            // If-None-Match: "<etag_value>", "<etag_value>", …
+            // If-None-Match: *
+
+            if request_etag.contains(&current_etag_value) {
+                return Some(res.set_status(NOT_MODIFIED));
+            }
+        }
+
+        let bytes = match fs::read(&full_path) {
+            Ok(bytes) => bytes,
+            Err(_) => return Some(Response::new().set_status(NOT_FOUND)),
+        };
+
+        let extension = full_path.extension();
+        let content_type = extension_to_mime_impl(extension);
+
+        Some(
+            res.set_status(OK)
+                .set_header("Content-Type", content_type)
+                .set_body(bytes),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_prefix_and_path() {
+        let fs = FileServer::new("", "");
+        assert_eq!(fs.request_prefix, "/");
+        assert_eq!(fs.fs_path, ".");
+    }
+
+    #[test]
+    fn respond_to_request_with_no_path() {
+        let req = Request::default();
+        let fs = FileServer::new("", "");
+
+        // An empty prefix defaults to `/`..which is not a prefix of a path
+        // that does not begin with `/`.
+        assert_eq!(fs.respond(&req), None);
+    }
+
+    #[test]
+    fn respond_to_request_with_path_outside_prefix() {
+        let mut req = Request::default();
+        req.path = String::from("/about");
+        let fs = FileServer::new("/static", ".");
+
+        assert_eq!(fs.respond(&req), None);
+    }
+
+    #[test]
+    fn respond_to_request_with_non_existing_file() {
+        let fs = FileServer::new("/static", "./src");
+
+        let mut req = Request::default();
+        req.method = String::from("GET");
+        req.path = String::from("/static/../file.txt");
+
+        assert_eq!(
+            fs.respond(&req),
+            Some(Response::new().set_status(NOT_FOUND))
+        );
+    }
+
+    #[test]
+    fn respond_to_request_trying_to_escape_file_hierarchy() {
+        let fs = FileServer::new("/static", "./src");
+
+        let mut req = Request::default();
+        req.method = String::from("GET");
+        req.path = String::from("/static/../README.md");
+
+        assert_eq!(
+            fs.respond(&req),
+            Some(Response::new().set_status(NOT_FOUND))
+        );
+    }
+
+    #[test]
+    fn response_always_contains_etag() {}
 }
 
 /// Returns the mime type of a file based on its extension.
