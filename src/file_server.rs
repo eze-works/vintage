@@ -24,7 +24,7 @@ impl FileServer {
             Utf8PathBuf::from(path)
         };
 
-        // TODO: Log a warning if `fs_path` does not exist
+        // TODO: Log a warning if `fs_path` does not exist?
 
         Self {
             request_prefix,
