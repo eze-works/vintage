@@ -53,8 +53,6 @@ impl Router {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Arc;
 
     fn make_request(method: &str, path: &str) -> Request {
         let mut req = Request::default();
@@ -64,71 +62,68 @@ mod test {
     }
 
     #[test]
-    fn implementing_trailing_slash() {
-        let called = Arc::new(AtomicBool::new(false));
-        let counter = Arc::new(AtomicUsize::new(0));
-
+    fn non_matching_method() {
         let mut router = Router::new();
-        router.register("GET", ["/path/", "/path"], {
-            let counter = counter.clone();
-            let called = called.clone();
-            move |_req, params| {
-                assert!(params.is_empty());
-                called.store(true, Ordering::SeqCst);
-                counter.fetch_add(1, Ordering::SeqCst);
-                Response::default()
-            }
+        router.register("GET", ["/path"], move |_req, _params| Response::default());
+
+        let mut request = make_request("POST", "/path");
+        let response = router.respond(&mut request);
+
+        assert_eq!(response, None);
+    }
+
+    #[test]
+    fn non_matching_path() {
+        let mut router = Router::new();
+        router.register("GET", ["/path"], move |_req, _params| Response::default());
+
+        let mut request = make_request("GET", "/rong");
+        let response = router.respond(&mut request);
+
+        assert_eq!(response, None);
+    }
+
+    #[test]
+    fn implementing_trailing_slash() {
+        let mut router = Router::new();
+        router.register("GET", ["/path/", "/path"], move |_req, _params| {
+            Response::default().set_status(100)
         });
 
         let mut request1 = make_request("GET", "/path");
         let mut request2 = make_request("GET", "/path/");
 
-        let _ = router.respond(&mut request1);
-        let _ = router.respond(&mut request2);
+        let response1 = router.respond(&mut request1).unwrap();
+        let response2 = router.respond(&mut request2).unwrap();
 
-        assert_eq!(called.load(Ordering::SeqCst), true);
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
+        assert_eq!(response1, Response::default().set_status(100));
+        assert_eq!(response2, Response::default().set_status(100));
     }
 
     #[test]
     fn wildcard_matching() {
-        let called = Arc::new(AtomicBool::new(false));
-
         let mut router = Router::new();
-        router.register("GET", ["/path/{*rest}"], {
-            let called = called.clone();
-            move |_req, params| {
-                assert_eq!(params["rest"], "a/b/c");
-                called.store(true, Ordering::SeqCst);
-                Response::default()
-            }
+        router.register("GET", ["/path/{*rest}"], move |_req, params| {
+            Response::default().set_body(&params["rest"])
         });
 
         let mut request = make_request("GET", "/path/a/b/c");
+        let response = router.respond(&mut request).unwrap();
 
-        let _ = router.respond(&mut request);
-
-        assert_eq!(called.load(Ordering::SeqCst), true);
+        assert_eq!(response, Response::default().set_body("a/b/c"));
     }
 
     #[test]
     fn segment_matching() {
-        let called = Arc::new(AtomicBool::new(false));
-
         let mut router = Router::new();
         router.register("GET", ["/path/{id}/rest"], {
-            let called = called.clone();
-            move |_req, params| {
-                assert_eq!(params["id"], "2");
-                called.store(true, Ordering::SeqCst);
-                Response::default()
-            }
+            move |_req, params| Response::default().set_body(&params["id"])
         });
 
         let mut request = make_request("GET", "/path/2/rest");
 
-        let _ = router.respond(&mut request);
+        let response = router.respond(&mut request).unwrap();
 
-        assert_eq!(called.load(Ordering::SeqCst), true);
+        assert_eq!(response, Response::default().set_body(String::from("2")));
     }
 }

@@ -11,21 +11,19 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 /// Configuration for a `vintage` FastCGI Server
-#[derive(Clone)]
+type FallbackCallback = Arc<dyn Fn(&mut Request) -> Response + Send + Sync>;
+
+#[derive(Clone, Default)]
 pub struct ServerSpec {
     file_server: Option<FileServer>,
     router: Option<Router>,
-    fallback: Option<Arc<dyn Fn(&mut Request) -> Response + Send + Sync>>,
+    fallback: Option<FallbackCallback>,
 }
 
 impl ServerSpec {
     /// Creates a new specification for a FastCGI server
     pub fn new() -> Self {
-        Self {
-            file_server: None,
-            router: None,
-            fallback: None,
-        }
+        Self::default()
     }
 
     /// Starts the FastCGI server at `address` and returns a handle to it.
@@ -345,7 +343,7 @@ mod tests {
         let server = ServerSpec::new()
             .unhandled(|req| {
                 let body = std::mem::take(&mut req.body);
-                Response::default().set_body(body)
+                Response::default().set_raw_body(body)
             })
             .start("localhost:0")
             .unwrap();

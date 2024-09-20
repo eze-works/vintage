@@ -38,9 +38,7 @@ impl FileServer {
         }
 
         // Ignore the request if its prefix is different from what was configured
-        let Some(path) = req.path.strip_prefix(&self.request_prefix) else {
-            return None;
-        };
+        let path = req.path.strip_prefix(&self.request_prefix)?;
 
         // First, validate that the base path exists.
         // The user could have provided a relative path.
@@ -121,7 +119,7 @@ impl FileServer {
         Some(
             res.set_status(OK)
                 .set_header("Content-Type", content_type)
-                .set_body(bytes),
+                .set_raw_body(bytes),
         )
     }
 }
@@ -224,7 +222,7 @@ mod tests {
                 .set_header("ETag", etag)
                 .set_header("Cache-Control", "no-cache")
                 .set_header("Content-Type", "text/markdown")
-                .set_body(content)
+                .set_raw_body(content)
         );
     }
 

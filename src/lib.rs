@@ -7,20 +7,18 @@
 //! ```
 //! use vintage::{Response, ServerSpec};
 //!
-//! fn main() {
-//!     let handle = ServerSpec::new()
-//!         .on_get(["/about"], |_req, _params| {
-//!             Response::html("<h1>Hello World</h1>")
-//!         })
-//!         .start("localhost:0")
-//!         .unwrap();
-//!     
-//!     // This would block the current thread until the server thread exits
-//!     // handle.join()
+//! let handle = ServerSpec::new()
+//!     .on_get(["/about"], |_req, _params| {
+//!         Response::html("<h1>Hello World</h1>")
+//!     })
+//!     .start("localhost:0")
+//!     .unwrap();
+//! 
+//! // This would block the current thread until the server thread exits
+//! // handle.join()
 //!
-//!     // Gracefull shutdown
-//!     handle.stop();
-//! }
+//! // Gracefull shutdown
+//! handle.stop();
 //! ```
 //!
 //!

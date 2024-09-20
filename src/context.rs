@@ -88,7 +88,12 @@ impl Response {
     }
 
     /// Sets the response body
-    pub fn set_body(mut self, body: Vec<u8>) -> Self {
+    pub fn set_body(self, body: impl Into<String>) -> Self {
+        self.set_raw_body(body.into().into_bytes())
+    }
+
+    /// Sets the response body in bytes
+    pub fn set_raw_body(mut self, body: Vec<u8>) -> Self {
         self.body = body;
         self
     }
@@ -96,7 +101,7 @@ impl Response {
     fn of_content_type(content_type: &str, value: impl Into<String>) -> Self {
         Response::default()
             .set_header("Content-Type", content_type)
-            .set_body(value.into().into_bytes())
+            .set_body(value)
     }
 
     /// Returns a new json response with the given value
