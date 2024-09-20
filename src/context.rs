@@ -1,7 +1,7 @@
 use crate::status;
-use std::any::{Any, TypeId};
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -54,7 +54,6 @@ pub struct Response {
     status: u16,
     headers: BTreeMap<String, String>,
     body: Vec<u8>,
-    data: BTreeMap<TypeId, Box<dyn Any>>,
 }
 
 impl Default for Response {
@@ -64,7 +63,6 @@ impl Default for Response {
             status: 200,
             headers: BTreeMap::new(),
             body: Vec::new(),
-            data: BTreeMap::new(),
         }
     }
 }
@@ -73,45 +71,27 @@ impl Response {
     /// Sets the response header `key` to `value`
     ///
     /// If `key` was already present in the map, the value is updated
-    pub fn set_header(&mut self, key: impl Into<String>, value: impl Into<String>) -> &mut Self {
+    pub fn set_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(key.into(), value.into());
         self
     }
 
     /// Sets the status code of the response to `code`
-    pub fn set_status(&mut self, code: u16) -> &mut Self {
+    pub fn set_status(mut self, code: u16) -> Self {
         self.status = code;
         self
     }
 
     /// Sets the response body
-    pub fn set_body(&mut self, body: Vec<u8>) -> &mut Self {
+    pub fn set_body(mut self, body: Vec<u8>) -> Self {
         self.body = body;
         self
     }
 
-    /// Returns a shared reference to previously [stored](Response::set_data) data.
-    pub fn data<D: Any>(&self) -> Option<&D> {
-        self.data
-            .get(&TypeId::of::<D>())
-            .and_then(|b| b.downcast_ref::<D>())
-    }
-
-    /// Store data, keyed by type, to be used in later stages of a pipeline
-    ///
-    /// This overwrites any previous value of the same type.
-    pub fn set_data(mut self, value: impl Any) -> Self {
-        self.data.insert(value.type_id(), Box::new(value));
-        self
-    }
-
     fn of_content_type(content_type: &str, value: impl Into<String>) -> Self {
-        let mut response = Response::default();
-        response
+        Response::default()
             .set_header("Content-Type", content_type)
-            .set_body(value.into().into_bytes());
-
-        response
+            .set_body(value.into().into_bytes())
     }
 
     /// Returns a new json response with the given value
@@ -137,11 +117,9 @@ impl Response {
     /// Search engines receiving this response will not attribute links to the original URL to the
     /// new resource, meaning no SEO value is transferred to the new URL.
     pub fn temporary_redirect(path: impl Into<String>) -> Self {
-        let mut response = Response::default();
-        response
+        Response::default()
             .set_header("Location", path)
-            .set_status(status::TEMPORARY_REDIRECT);
-        response
+            .set_status(status::TEMPORARY_REDIRECT)
     }
 
     /// Returns a new response that will trigger a permanent redirect
@@ -152,10 +130,17 @@ impl Response {
     /// Search engines receiving this response will attribute links to the original URL to the
     /// redirected resource, passing the SEO ranking to the new URL.
     pub fn permanent_redirect(path: impl Into<String>) -> Self {
-        let mut response = Response::default();
-        response
+        Response::default()
             .set_header("Location", path)
-            .set_status(status::PERMANENT_REDIRECT);
-        response
+            .set_status(status::PERMANENT_REDIRECT)
+    }
+
+    pub(crate) fn write_stdout_bytes<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
+        for (key, value) in self.headers.iter() {
+            writeln!(writer, "{key}: {value}")?;
+        }
+        writeln!(writer, "Status: {}", self.status)?;
+        writeln!(writer)?;
+        writer.write_all(&self.body)
     }
 }

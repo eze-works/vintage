@@ -1,212 +1,88 @@
-use super::{Pipe, PipeResult};
-use crate::context::Context;
+use crate::context::{Request, Response};
 use crate::status;
-use crate::FcgiContext;
-use camino::Utf8PathBuf;
+use camino::Utf8Path;
 use filetime::FileTime;
 use std::fs;
 
-/// A [`Pipe`] for serving static files
-#[derive(Debug, Clone)]
-pub struct FileServer {
-    request_prefix: String,
-    fs_path: Utf8PathBuf,
-}
+pub fn respond(path: &str, base: &Utf8Path, req: &Request) -> Response {
+    // First, validate that the base path exists.
+    // The user could have provided a relative path.
+    let Ok(base) = base.canonicalize_utf8() else {
+        return Response::default().set_status(status::NOT_FOUND);
+    };
 
-#[derive(Debug, PartialEq, Eq)]
-enum ResolveResult {
-    Ignore,
-    NotFound,
-    Found(Utf8PathBuf, i64),
-}
+    // Create the full path: <base>/<path>
+    // For this to work though, we need to strip any leading forward slashes from `path`
+    // If we do not do this, `Path::join()` will assume it is an absolute path
+    let full_path = base.join(path.trim_start_matches('/'));
 
-impl FileServer {
-    /// Creates a new `FileServer` pipe
-    ///
-    /// Matches requests that start with `prefix` and uses the rest of that path to lookup and
-    /// serve a file from `path`
-    ///
-    /// If `prefix` does not begin with a forward slash (e.g. `/static`), it is implied.
-    /// An empty or relative `path` implies the current working directory
-    ///
-    /// # Panics
-    ///
-    /// Panics if `path` contains invalid utf8 values
-    pub fn new(prefix: &'static str, path: &'static str) -> Self {
-        let request_prefix = if prefix.starts_with('/') {
-            prefix.to_string()
-        } else {
-            format!("/{}", prefix)
-        };
+    // Ensure the path exists
+    let Ok(full_path) = full_path.canonicalize_utf8() else {
+        return Response::default().set_status(status::NOT_FOUND);
+    };
 
-        let path = if path.trim().is_empty() {
-            Utf8PathBuf::from(".")
-        } else {
-            Utf8PathBuf::from(path)
-        };
+    // Ensure the canonical form still points to a directory inside `base`
+    // This prevents things like `GET ../../blah.txt`
+    if !full_path.starts_with(&base) {
+        return Response::default().set_status(status::NOT_FOUND);
+    };
 
-        Self {
-            request_prefix,
-            fs_path: path,
+    // Ensure the path points to a file (and not a directory)
+    let mtime = match full_path.metadata() {
+        Ok(meta) if meta.is_file() => FileTime::from_last_modification_time(&meta).unix_seconds(),
+        _ => return Response::default().set_status(status::NOT_FOUND),
+    };
+
+    // Caching approach:
+    // + Always send `Cache-Control: no-cache`.
+    //   + This prevents clients from caching. But they'll still attempt to validate stale
+    //     responses.
+    // + Always send `ETag: "<file-modification-time>"`
+    // + Examine the `If-None-Match` header if it exists.
+    //   This is the header the browser sends when it wants to validate a stale response.
+    //   Since none of our responses are cached (i.e. stale), the browser will basically always send this.
+    //   + If the modified time of the file is the same, send 304 without the body (win!)
+    //   + If the file has changed, send 200 OK as usual
+    // + Always send `Last-Modified` as MDN says it's always useful to do so, for non-caching
+    //   reasons (e.g. crawlers)
+    //
+    // Source: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching#etagif-none-match
+    // The filetime as unix seconds is used as the etag
+
+    let current_etag_value = format!("\"{}\"", mtime);
+    let mut response = Response::default()
+        .set_header("Cache-Control", "no-cache")
+        .set_header("ETag", &current_etag_value);
+
+    if let Ok(mtime) = jiff::Timestamp::from_second(mtime) {
+        // e.g. Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT
+        let last_modified = mtime.strftime("%a, %d %b %Y %H:%M:%S GMT");
+        response = response.set_header("Last-Modified", last_modified.to_string());
+    }
+
+    if let Some(request_etag) = req.headers.get("If-None-Match") {
+        // This header can look like:
+        // If-None-Match: "<etag_value>"
+        // If-None-Match: "<etag_value>", "<etag_value>", …
+        // If-None-Match: *
+
+        if request_etag.contains(&current_etag_value) {
+            return response.set_status(status::NOT_MODIFIED);
         }
     }
 
-    fn resolve_path(&self, path: &str) -> ResolveResult {
-        // Ignore the request if it has a different prefix
-        let Some(suffix) = path.strip_prefix(&self.request_prefix) else {
-            return ResolveResult::Ignore;
-        };
+    let bytes = match fs::read(&full_path) {
+        Ok(bytes) => bytes,
+        Err(_) => return Response::default().set_status(status::NOT_FOUND),
+    };
 
-        // First, validate that the base path exists.
-        // The user could have provided a relative path.
-        let Ok(base) = self.fs_path.canonicalize_utf8() else {
-            return ResolveResult::NotFound;
-        };
+    let extension = full_path.extension();
+    let content_type = extension_to_mime_impl(extension);
 
-        // Create <base>/<suffx>
-        // For this to work though, we need to strip any leading forward slashes from `suffix`
-        let suffix = suffix.trim_start_matches('/');
-
-        let potential_file = base.join(suffix);
-
-        // Ensure the path exists
-        let Ok(potential_file) = potential_file.canonicalize_utf8() else {
-            return ResolveResult::NotFound;
-        };
-
-        // Ensure the canonical form still points to a directory inside `base`
-        // This prevents things like `GET ../../blah.txt`
-        if !potential_file.starts_with(&base) {
-            return ResolveResult::NotFound;
-        };
-
-        // Ensure the path points to a file (and not a directory)
-        let mtime = match potential_file.metadata() {
-            Ok(meta) if meta.is_file() => {
-                FileTime::from_last_modification_time(&meta).unix_seconds()
-            }
-            _ => return ResolveResult::NotFound,
-        };
-
-        ResolveResult::Found(potential_file, mtime)
-    }
-}
-
-impl Pipe for FileServer {
-    fn run(&self, ctx: &mut Context) -> bool {
-        if ctx.request.method != "GET" {
-            return false;
-        }
-
-        let (path, mtime) = match self.resolve_path(ctx.path()) {
-            ResolveResult::NotFound | ResolveResult::Ignore => {
-                return false;
-            }
-            ResolveResult::Found(p, m) => (p, m),
-        };
-
-        // Caching approach:
-        // + Always send `Cache-Control: no-cache`.
-        //   + This prevents clients from caching. But they'll still attempt to validate stale
-        //     responses.
-        // + Always send `ETag: "<file-modification-time>"`
-        // + Examine the `If-None-Match` header if it exists.
-        //   This is the header the browser sends when it wants to validate a stale response.
-        //   Since none of our responses are cached (i.e. stale), the browser will basically always send this.
-        //   + If the modified time of the file is the same, send 304 without the body (win!)
-        //   + If the file has changed, send 200 OK as usual
-        // + Always send `Last-Modified` as MDN says it's always useful to do so, for non-caching
-        //   reasons (e.g. crawlers)
-        //
-        // Source: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching#etagif-none-match
-        // The filetime as unix seconds is used as the etag
-        let current_etag_value = format!("\"{}\"", mtime);
-
-        ctx.response
-            .set_header("Cache-Control", "no-cache")
-            .set_header"ETag", &current_etag_value);
-
-        if let Ok(mtime) = jiff::Timestamp::from_second(mtime) {
-            // e.g. Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT
-            let last_modified = mtime.strftime("%a, %d %b %Y %H:%M:%S GMT");
-            ctx.set_header("Last-Modified", last_modified.to_string());
-        }
-
-        if let Some(request_etag) = ctx.request.headers.get("If-None-Match") {
-            // This header can look like:
-            // If-None-Match: "<etag_value>"
-            // If-None-Match: "<etag_value>", "<etag_value>", …
-            // If-None-Match: *
-
-            if request_etag.contains(&current_etag_value) {
-                ctx.response.set_status(status::NOT_MODIFIED);
-                return true;
-            }
-        }
-
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(_) => return false,
-        };
-
-        let extension = path.extension();
-        let content_type = extension_to_mime_impl(extension);
-
-        Some(
-            ctx.with_status(status::OK)
-                .with_content_type(content_type)
-                .with_raw_body(bytes),
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_matches::assert_matches;
-
-    #[test]
-    fn empty_arguments() {
-        // All requests should be considered and resolved from the current directory
-        let fs = FileServer::new("", "");
-
-        assert_eq!(fs.resolve_path("/"), ResolveResult::NotFound);
-        assert_eq!(fs.resolve_path("/what"), ResolveResult::NotFound);
-        assert_eq!(fs.resolve_path("/src"), ResolveResult::NotFound);
-        assert_eq!(fs.resolve_path("/../../.bashrc"), ResolveResult::NotFound);
-        assert_matches!(fs.resolve_path("/src/lib.rs"), ResolveResult::Found(_, _));
-
-        // This is the exception. An empty prefix defaults to `/`..which is not a prefix of a path
-        // that does not begin with `/`.
-        // This is not a problem though as all requests should have a path starting with `/`
-        assert_eq!(fs.resolve_path(""), ResolveResult::Ignore);
-    }
-
-    #[test]
-    fn relative_paths_for_file_root() {
-        let fs = FileServer::new("", "../");
-
-        assert_eq!(fs.resolve_path("/"), ResolveResult::NotFound);
-        assert_eq!(fs.resolve_path("/vintage"), ResolveResult::NotFound);
-        assert_matches!(
-            fs.resolve_path("/vintage/README.md"),
-            ResolveResult::Found(_, _)
-        );
-    }
-
-    #[test]
-    fn using_a_prefix() {
-        let fs = FileServer::new("/static", "");
-
-        assert_eq!(fs.resolve_path("/"), ResolveResult::Ignore);
-        assert_eq!(fs.resolve_path("/src"), ResolveResult::Ignore);
-        assert_eq!(fs.resolve_path("static"), ResolveResult::Ignore);
-        assert_eq!(fs.resolve_path("/static"), ResolveResult::NotFound);
-        assert_matches!(
-            fs.resolve_path("/static/README.md"),
-            ResolveResult::Found(_, _)
-        );
-    }
+    response
+        .set_status(status::OK)
+        .set_header("Content-Type", content_type)
+        .set_body(bytes)
 }
 
 /// Returns the mime type of a file based on its extension.
