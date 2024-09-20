@@ -37,12 +37,15 @@ Pick one.
    - Nginx: `sudo nginx -p $(pwd) -c nginx.conf`
 4. Run `cargo new --bin app && cd app && cargo add vintage`, and stick this in `main.rs`:
    ```rust
-   use vintage::start;
+   use vintage::{ServerSpec, Response};
 
    fn main() {
-       let server = start("localhost:8000", |ctx| {
-           ctx.with_body("<h1>Hello World</h1>")
-       }).unwrap();
+       let server = ServerSpec::new()
+           .on_get(["/about"], |_req, _params| {
+               Response::html("<h1>Hello World</h1>")
+           })
+           .start("localhost:8080")
+           .unwrap();
 
        server.join();
    }

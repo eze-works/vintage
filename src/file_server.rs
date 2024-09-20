@@ -129,6 +129,26 @@ impl FileServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino::Utf8Path;
+    use std::collections::BTreeMap;
+
+    struct FileInfo {
+        etag: String,
+        last_modified: String,
+        content: Vec<u8>,
+    }
+
+    fn file_info(path: &str) -> FileInfo {
+        let metadata = Utf8Path::new(path).metadata().unwrap();
+        let mtime = FileTime::from_last_modification_time(&metadata).unix_seconds();
+        let timestamp = jiff::Timestamp::from_second(mtime).unwrap();
+        let last_modified = timestamp.strftime("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        FileInfo {
+            etag: format!("\"{mtime}\""),
+            last_modified,
+            content: fs::read(path).unwrap(),
+        }
+    }
 
     #[test]
     fn empty_prefix_and_path() {
@@ -185,7 +205,52 @@ mod tests {
     }
 
     #[test]
-    fn response_always_contains_etag() {}
+    fn respond_to_uncached_file() {
+        let fs = FileServer::new("/static", ".");
+        let FileInfo {
+            etag,
+            last_modified,
+            content,
+        } = file_info("./README.md");
+
+        let mut req = Request::default();
+        req.method = String::from("GET");
+        req.path = String::from("/static/README.md");
+
+        assert_eq!(
+            fs.respond(&req).unwrap(),
+            Response::new()
+                .set_header("Last-Modified", last_modified)
+                .set_header("ETag", etag)
+                .set_header("Cache-Control", "no-cache")
+                .set_header("Content-Type", "text/markdown")
+                .set_body(content)
+        );
+    }
+
+    #[test]
+    fn respond_to_cached_file() {
+        let fs = FileServer::new("/static", ".");
+        let FileInfo {
+            etag,
+            last_modified,
+            ..
+        } = file_info("./README.md");
+
+        let mut req = Request::default();
+        req.method = String::from("GET");
+        req.path = String::from("/static/README.md");
+        req.headers = BTreeMap::from([("If-None-Match".to_string(), etag.clone())]);
+
+        assert_eq!(
+            fs.respond(&req).unwrap(),
+            Response::new()
+                .set_status(NOT_MODIFIED)
+                .set_header("Last-Modified", last_modified)
+                .set_header("ETag", etag)
+                .set_header("Cache-Control", "no-cache")
+        );
+    }
 }
 
 /// Returns the mime type of a file based on its extension.
@@ -427,6 +492,7 @@ fn extension_to_mime_impl(extension: Option<&str>) -> &'static str {
         Some("manifest") => "application/x-ms-manifest",
         Some("map") => "text/plain; charset=utf8",
         Some("master") => "application/xml",
+        Some("md") => "text/markdown",
         Some("mda") => "application/msaccess",
         Some("mdb") => "application/x-msaccess",
         Some("mde") => "application/msaccess",
