@@ -1,14 +1,13 @@
 use crate::error::Error;
 use crate::record::{self, *};
-use bufstream::BufStream;
 #[cfg(test)]
 use std::collections::VecDeque;
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::TcpStream;
 
 #[derive(Debug)]
 pub enum Connection {
-    Tcp(BufStream<TcpStream>),
+    Tcp(BufReader<TcpStream>, BufWriter<TcpStream>),
     #[cfg(test)]
     Test(VecDeque<u8>),
 }
@@ -16,7 +15,7 @@ pub enum Connection {
 impl Write for Connection {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp(w) => w.write(buf),
+            Connection::Tcp(_, w) => w.write(buf),
             #[cfg(test)]
             Connection::Test(w) => w.write(buf),
         }
@@ -24,7 +23,7 @@ impl Write for Connection {
 
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
-            Connection::Tcp(w) => w.flush(),
+            Connection::Tcp(_, w) => w.flush(),
             #[cfg(test)]
             Connection::Test(w) => w.flush(),
         }
@@ -34,7 +33,7 @@ impl Write for Connection {
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            Connection::Tcp(r) => r.read(buf),
+            Connection::Tcp(r, _) => r.read(buf),
             #[cfg(test)]
             Connection::Test(r) => r.read(buf),
         }
@@ -50,10 +49,14 @@ impl TryFrom<mio::net::TcpStream> for Connection {
         // Additionally add a timeout for io operations so that an idle connection is not kept open
         // indefinitely
         let stream = TcpStream::from(value);
-        stream.set_nonblocking(false)?;
         let timeout = std::time::Duration::from_secs(3);
+        stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(timeout))?;
-        Ok(Connection::Tcp(BufStream::new(stream)))
+        let writer = stream.try_clone()?;
+        Ok(Connection::Tcp(
+            BufReader::new(stream),
+            BufWriter::new(writer),
+        ))
     }
 }
 

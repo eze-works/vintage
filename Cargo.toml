@@ -10,7 +10,6 @@ categories = ["network-programming", "web-programming"]
 keywords = ["fastcgi", "cgi"]
 
 [dependencies]
-bufstream = "0.1.4"
 camino = "1.1.9"
 convert_case = "0.6.0"
 filetime = "0.2.25"
