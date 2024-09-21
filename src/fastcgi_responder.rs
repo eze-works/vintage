@@ -1,8 +1,8 @@
-use super::ServerSpec;
 use crate::connection::Connection;
 use crate::context::{Request, Response};
 use crate::error::Error;
 use crate::record::*;
+use crate::server_config::ServerConfig;
 use crate::status;
 use convert_case::{Case, Casing};
 use std::collections::BTreeMap;
@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 // There are two expected flows;
 // + We receive a `GetValues` request to which we respond.
 // + We receive a `BeginRequest` request followed by Params and Stdin. Respond using Stdout followed by EndRequest
-pub fn handle_connection(mut conn: Connection, spec: ServerSpec) {
+pub fn handle_connection(mut conn: Connection, config: ServerConfig) {
     let first_record = match conn.read_record() {
         Ok(r) => r,
         Err(e) => {
@@ -83,32 +83,46 @@ pub fn handle_connection(mut conn: Connection, spec: ServerSpec) {
         }
     }
 
-    let mut req = Request::default();
-    req.method = method;
-    req.path = path;
-    req.query_string = query_string;
-    req.headers = headers;
-    req.body = stdin.take();
+    let mut req = Request {
+        method,
+        path,
+        query_string,
+        headers,
+        body: stdin.take(),
+        ..Request::default()
+    };
 
     let mut response: Option<Response> = None;
 
-    if let Some(fs) = spec.file_server {
+    if let Some(fs) = config.file_server {
         response = fs.respond(&req);
     };
 
     if response.is_none() {
-        if let Some(router) = spec.router {
+        if let Some(router) = config.router {
             response = router.respond(&mut req);
         }
     }
 
     if response.is_none() {
-        if let Some(fallback) = spec.fallback {
+        if let Some(fallback) = config.fallback {
             response = Some(fallback(&mut req));
         }
     }
 
     let response = response.unwrap_or(Response::default().set_status(status::NOT_FOUND));
+
+    let elapsed = req.created_at.elapsed();
+
+    log::info!(
+        status = response.status,
+        method = req.method,
+        path = req.path,
+        query = req.query_string,
+        elapsed_milli = elapsed.as_millis(),
+        elapsed_micro = elapsed.as_micros();
+        "fastcgi-request"
+    );
 
     let mut stdout = Stdout(vec![]);
     let _ = response.write_stdout_bytes(&mut stdout.0);

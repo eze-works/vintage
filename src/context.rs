@@ -4,15 +4,16 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::time::Instant;
 
+/// A FastCGI request
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
-    pub method: String,
-    pub path: String,
-    pub query_string: String,
-    pub headers: BTreeMap<String, String>,
-    pub body: Vec<u8>,
-    pub created_at: Instant,
-    query: OnceCell<BTreeMap<String, String>>,
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) query_string: String,
+    pub(crate) headers: BTreeMap<String, String>,
+    pub(crate) body: Vec<u8>,
+    pub(crate) created_at: Instant,
+    pub(crate) query: OnceCell<BTreeMap<String, String>>,
 }
 
 impl Default for Request {
@@ -26,6 +27,35 @@ impl Default for Request {
             created_at: Instant::now(),
             query: OnceCell::new(),
         }
+    }
+}
+
+impl Request {
+    /// Returns the request method
+    pub fn method(&self) -> &str {
+        self.method.as_str()
+    }
+
+    /// Returns the request path
+    pub fn path(&self) -> &str {
+        self.path.as_str()
+    }
+
+    /// Looks up the header value associated with `key`, if any
+    pub fn header(&self, key: &str) -> Option<&str> {
+        self.headers.get(key).map(String::as_str)
+    }
+
+    /// Returns a reference to the request body
+    pub fn body(&self) -> &[u8] {
+        self.body.as_slice()
+    }
+
+    /// Returns the request body as an owned `Vec`
+    ///
+    /// Once the request body has been `take`n, subsequent calls return an empty `Vec`
+    pub fn take_body(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.body)
     }
 }
 
@@ -49,11 +79,12 @@ impl Request {
     }
 }
 
+/// A FastCGI response
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
-    status: u16,
-    headers: BTreeMap<String, String>,
-    body: Vec<u8>,
+    pub(crate) status: u16,
+    pub(crate) headers: BTreeMap<String, String>,
+    pub(crate) body: Vec<u8>,
 }
 
 impl Default for Response {

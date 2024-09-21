@@ -5,15 +5,15 @@
 //! Using this crate is straightforward:
 //!
 //! ```
-//! use vintage::{Response, ServerSpec};
+//! use vintage::{Response, ServerConfig};
 //!
-//! let handle = ServerSpec::new()
+//! let config = ServerConfig::new()
 //!     .on_get(["/about"], |_req, _params| {
 //!         Response::html("<h1>Hello World</h1>")
-//!     })
-//!     .start("localhost:0")
-//!     .unwrap();
-//! 
+//!     });
+//!
+//! let handle = vintage::start(config, "localhost:0").unwrap();
+//!
 //! // This would block the current thread until the server thread exits
 //! // handle.join()
 //!
@@ -21,8 +21,7 @@
 //! handle.stop();
 //! ```
 //!
-//!
-//! # Terminology:
+//! # Terminology
 //!
 //! - CGI: A specification HTTP web servers can follow to execute a program in response to HTTP requests.
 //!   For example, you would configure your web server (e.g. Apache) to execute a certain bash script when a request came in.
@@ -66,11 +65,33 @@
 mod connection;
 mod context;
 mod error;
+mod event_loop;
+mod fastcgi_responder;
 mod file_server;
 mod record;
 mod router;
-mod server;
+mod server_config;
+mod server_handle;
 pub mod status;
 
 pub use context::{Request, Response};
-pub use server::{ServerExitReason, ServerHandle, ServerSpec};
+pub use server_config::ServerConfig;
+pub use server_handle::{ServerExitReason, ServerHandle};
+
+use std::io;
+use std::net::ToSocketAddrs;
+
+/// Starts a FastCGI server with the given config at `address` and returns a handle to it.
+///
+/// Binding to port `0` will request that the OS assign an available port.
+///
+/// If `address` yields multiple addresses, only the first one is considered.
+///
+/// This function does not block because the FastCGI server is created on a separate thread.
+pub fn start(config: ServerConfig, address: impl ToSocketAddrs) -> Result<ServerHandle, io::Error> {
+    let mut iter = address.to_socket_addrs()?;
+    let first_address = iter
+        .next()
+        .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
+    event_loop::create_handle(config, first_address)
+}

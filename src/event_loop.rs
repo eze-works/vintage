@@ -1,5 +1,7 @@
-use super::{responder, ServerExitReason, ServerHandle, ServerSpec};
 use crate::connection::Connection;
+use crate::fastcgi_responder;
+use crate::server_config::ServerConfig;
+use crate::server_handle::{ServerExitReason, ServerHandle};
 use mio::event::Events;
 use mio::net::TcpListener;
 use mio::{Interest, Poll, Token, Waker};
@@ -14,18 +16,18 @@ const SHUTDOWN: Token = Token(1);
 
 struct EventLoop {
     socket: TcpListener,
-    spec: ServerSpec,
+    spec: ServerConfig,
     poll: Poll,
     events: Events,
     signal_shutdown: SyncSender<()>,
 }
 
-pub fn create_handle(spec: ServerSpec, address: SocketAddr) -> Result<ServerHandle, io::Error> {
+pub fn create_handle(spec: ServerConfig, address: SocketAddr) -> Result<ServerHandle, io::Error> {
     // One of the requirements is that the user of the library be able to shutdown the server
     // gracefully. This means that there should be some way for the user to say "finish all
     // in-flight work, then stop the thread pool".
     //
-    // This requirement drastically changes how `ServerSpec::start()` works:
+    // This requirement drastically changes how `ServerConfig::start()` works:
     // 1) It needs to return some type of handle the user can use to later stop the server.
     // 2) The handle needs to somehow "wake up" the call to `socket.accept()` when it is time to
     //    shutdown.
@@ -113,7 +115,7 @@ fn start(mut evloop: EventLoop) -> ServerExitReason {
                             pool.execute({
                                 let spec = evloop.spec.clone();
                                 move || {
-                                    responder::handle_connection(connection, spec);
+                                    fastcgi_responder::handle_connection(connection, spec);
                                 }
                             });
                         }

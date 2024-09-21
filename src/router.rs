@@ -36,9 +36,9 @@ impl Router {
     }
 
     pub fn respond(&self, req: &mut Request) -> Option<Response> {
-        let router = self.map.get(req.method.as_str())?;
+        let router = self.map.get(req.method())?;
 
-        let entry = router.at(&req.path).ok()?;
+        let entry = router.at(req.path()).ok()?;
 
         let mut params = BTreeMap::new();
 
@@ -55,10 +55,11 @@ mod test {
     use super::*;
 
     fn make_request(method: &str, path: &str) -> Request {
-        let mut req = Request::default();
-        req.method = method.into();
-        req.path = path.into();
-        req
+        Request {
+            method: method.into(),
+            path: path.into(),
+            ..Request::default()
+        }
     }
 
     #[test]
