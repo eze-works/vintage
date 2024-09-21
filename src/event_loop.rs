@@ -16,7 +16,7 @@ const SHUTDOWN: Token = Token(1);
 
 struct EventLoop {
     socket: TcpListener,
-    spec: ServerConfig,
+    config: ServerConfig,
     poll: Poll,
     events: Events,
     signal_shutdown: SyncSender<()>,
@@ -71,7 +71,7 @@ pub fn create_handle(spec: ServerConfig, address: SocketAddr) -> Result<ServerHa
 
     let event_loop = EventLoop {
         socket,
-        spec,
+        config: spec,
         poll,
         events,
         signal_shutdown,
@@ -113,7 +113,7 @@ fn start(mut evloop: EventLoop) -> ServerExitReason {
                                 Err(err) => return ServerExitReason::Err(err),
                             };
                             pool.execute({
-                                let spec = evloop.spec.clone();
+                                let spec = evloop.config.clone();
                                 move || {
                                     fastcgi_responder::handle_connection(connection, spec);
                                 }

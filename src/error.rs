@@ -1,31 +1,59 @@
+use std::fmt::Display;
 use std::io;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("The connection socket was closed unexpectedly")]
-    UnexpectedSocketClose(#[source] io::Error),
-
-    #[error("Unsupported FastCGI version: '{0}'")]
+    UnexpectedSocketClose(io::Error),
     UnsuportedVersion(u8),
-
-    #[error("Unknown record type: '{0}'")]
     UnknownRecordType(u8),
-
-    #[error("Multiplexing multiple requests unto a single connection is not supported")]
     MultiplexingUnsupported,
-
-    #[error("Received malformed FastCGI record for type '{0}'")]
     MalformedRecordPayload(&'static str),
-
-    #[error("Unsuported FastCGI role: '{0}'")]
     UnsupportedRole(u16),
-
-    #[error("Unsupported FastCGI protocol status: '{0}'")]
     UnspportedProtocolStatus(u8),
-
-    #[error("Detected invalid utf8 in a key-value pair")]
     InvalidUtf8KeyValuePair,
-
-    #[error("Web server sent a malformed record stream")]
     MalformedRecordStream,
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnexpectedSocketClose(_) => {
+                write!(f, "The connection socket was closed unexpectedly")
+            }
+            Self::UnsuportedVersion(v) => {
+                write!(f, "Unsupported FastCGI version: '{v}'")
+            }
+            Self::UnknownRecordType(t) => {
+                write!(f, "Unknown record type: '{t}'")
+            }
+            Self::MultiplexingUnsupported => {
+                write!(
+                    f,
+                    "Multiplexing multiple requests unto a single connection is not supported"
+                )
+            }
+            Self::MalformedRecordPayload(s) => {
+                write!(f, "Received malformed FastCGI record for type '{s}'")
+            }
+            Self::UnsupportedRole(r) => write!(f, "Unsuported FastCGI role: '{r}'"),
+            Self::UnspportedProtocolStatus(s) => {
+                write!(f, "Unsupported FastCGI protocol status: '{s}'")
+            }
+            Self::InvalidUtf8KeyValuePair => {
+                write!(f, "Detected invalid utf8 in a key-value pair")
+            }
+            Self::MalformedRecordStream => {
+                write!(f, "Web server sent a malformed record stream")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnexpectedSocketClose(e) => Some(e),
+            _ => None,
+        }
+    }
 }
