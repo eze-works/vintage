@@ -215,40 +215,7 @@ impl Connection {
 
         Ok(())
     }
-
-    impl_expect!(GetValues);
-    impl_expect!(GetValuesResult);
-    impl_expect!(UnknownType);
-    impl_expect!(BeginRequest);
-    impl_expect!(EndRequest);
-    impl_expect!(Params);
-    impl_expect!(AbortRequest);
-    impl_expect!(Stdin);
-    impl_expect!(Stdout);
-    impl_expect!(Stderr);
-    impl_expect!(Data);
 }
-
-macro_rules! impl_expect {
-    ($t:path) => {
-        paste::paste! {
-            #[doc =
-                "Returns the next record if it is a [`" $t "`](crate::record::" $t ") record.\n\n"
-                "# Errors\n\n"
-                "Returns `Err(Some(Error))` if reading the connection failed.\n\n"
-                "Returns `Err(None)` if the next record was something else"
-            ]
-            pub fn [<expect_ $t:snake>](&mut self) -> Result<$t, Option<Error>> {
-                match self.read_record() {
-                    Ok(Record::$t(r)) => Ok(r),
-                    Ok(_) => Err(None),
-                    Err(e) => Err(Some(e))
-                }
-            }
-        }
-    };
-}
-pub(crate) use impl_expect;
 
 #[cfg(test)]
 mod round_trip_tests {

@@ -11,10 +11,6 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new() -> Self {
-        Router::default()
-    }
-
     pub fn register<C, const N: usize>(
         &mut self,
         method: &'static str,
@@ -64,7 +60,7 @@ mod test {
 
     #[test]
     fn non_matching_method() {
-        let mut router = Router::new();
+        let mut router = Router::default();
         router.register("GET", ["/path"], move |_req, _params| Response::default());
 
         let mut request = make_request("POST", "/path");
@@ -75,7 +71,7 @@ mod test {
 
     #[test]
     fn non_matching_path() {
-        let mut router = Router::new();
+        let mut router = Router::default();
         router.register("GET", ["/path"], move |_req, _params| Response::default());
 
         let mut request = make_request("GET", "/rong");
@@ -86,7 +82,7 @@ mod test {
 
     #[test]
     fn implementing_trailing_slash() {
-        let mut router = Router::new();
+        let mut router = Router::default();
         router.register("GET", ["/path/", "/path"], move |_req, _params| {
             Response::default().set_status(100)
         });
@@ -103,7 +99,7 @@ mod test {
 
     #[test]
     fn wildcard_matching() {
-        let mut router = Router::new();
+        let mut router = Router::default();
         router.register("GET", ["/path/{*rest}"], move |_req, params| {
             Response::default().set_body(&params["rest"])
         });
@@ -116,7 +112,7 @@ mod test {
 
     #[test]
     fn segment_matching() {
-        let mut router = Router::new();
+        let mut router = Router::default();
         router.register("GET", ["/path/{id}/rest"], {
             move |_req, params| Response::default().set_body(&params["id"])
         });

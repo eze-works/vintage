@@ -61,7 +61,6 @@
 //!   At best, what you send in that record gets printed in the logs of the FastCGI _client_.
 //!   At worst, it gets ignored.
 
-#![allow(dead_code)]
 mod connection;
 mod context;
 mod error;

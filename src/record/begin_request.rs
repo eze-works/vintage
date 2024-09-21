@@ -37,6 +37,7 @@ impl BeginRequest {
         self.flags & MASK_FCGI_KEEP_CONN == 1
     }
 
+    #[cfg(test)]
     pub fn new(role: Role, keep_alive: bool) -> Self {
         let flags = if keep_alive { 1 } else { 0 };
         Self { role, flags }

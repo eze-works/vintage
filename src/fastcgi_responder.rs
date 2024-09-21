@@ -13,20 +13,20 @@ use std::collections::BTreeMap;
 // + We receive a `GetValues` request to which we respond.
 // + We receive a `BeginRequest` request followed by Params and Stdin. Respond using Stdout followed by EndRequest
 pub fn handle_connection(mut conn: Connection, config: ServerConfig) {
-    let first_record = match conn.read_record() {
-        Ok(r) => r,
-        Err(e) => {
-            return handle_error(&mut conn, e);
+    let begin = match conn.read_record() {
+        Ok(Record::GetValues(r)) => {
+            handle_get_values(&mut conn, r);
+            return;
         }
-    };
-
-    if let Record::GetValues(r) = first_record {
-        return handle_get_values(&mut conn, r);
-    }
-
-    let Record::BeginRequest(begin) = first_record else {
-        log::error!("FastCGI connection began with unexpected record. Closing connection");
-        return;
+        Ok(Record::BeginRequest(r)) => r,
+        Ok(_) => {
+            log::error!("FastCGI connection began with unexpected record. Closing connection");
+            return;
+        }
+        Err(e) => {
+            handle_error(&mut conn, e);
+            return;
+        }
     };
 
     if begin.keep_alive() {
@@ -37,25 +37,27 @@ pub fn handle_connection(mut conn: Connection, config: ServerConfig) {
         return;
     }
 
-    let mut params = match conn.expect_params() {
-        Ok(params) => params,
-        Err(None) => {
+    let mut params = match conn.read_record() {
+        Ok(Record::Params(r)) => r,
+        Ok(_) => {
             log::error!("FastCGI connection missing Params record. Closing connection");
             return;
         }
-        Err(Some(e)) => {
-            return handle_error(&mut conn, e);
+        Err(e) => {
+            handle_error(&mut conn, e);
+            return;
         }
     };
 
-    let mut stdin = match conn.expect_stdin() {
-        Ok(stdin) => stdin,
-        Err(None) => {
+    let mut stdin = match conn.read_record() {
+        Ok(Record::Stdin(r)) => r,
+        Ok(_) => {
             log::error!("FastCGI connection missing Stdin record. Closing connection");
             return;
         }
-        Err(Some(e)) => {
-            return handle_error(&mut conn, e);
+        Err(e) => {
+            handle_error(&mut conn, e);
+            return;
         }
     };
 

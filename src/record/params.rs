@@ -18,6 +18,7 @@ impl Params {
         pairs::to_record_bytes(&self.0, writer)
     }
 
+    #[cfg(test)]
     pub fn add<K, V>(mut self, key: K, value: V) -> Self
     where
         K: std::fmt::Display,
@@ -25,10 +26,6 @@ impl Params {
     {
         self.0.insert(key.to_string(), value.to_string());
         self
-    }
-
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.0.get(name).map(|s| s.as_str())
     }
 
     pub fn take(&mut self) -> BTreeMap<String, String> {

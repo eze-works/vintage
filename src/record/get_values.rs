@@ -27,6 +27,7 @@ impl GetValues {
         self.names.keys().map(|k| k.as_str())
     }
 
+    #[cfg(test)]
     pub fn add(mut self, name: impl std::fmt::Display) -> Self {
         self.names.insert(name.to_string(), String::new());
         self
