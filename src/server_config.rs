@@ -3,9 +3,9 @@ use crate::file_server::FileServer;
 use crate::router::{RouteParams, Router};
 use std::sync::Arc;
 
-/// Configuration for a `vintage` FastCGI Server
 type FallbackCallback = Arc<dyn Fn(&mut Request) -> Response + Send + Sync>;
 
+/// Configuration for a `vintage` FastCGI Server
 #[derive(Clone, Default)]
 pub struct ServerConfig {
     pub(crate) file_server: Option<FileServer>,

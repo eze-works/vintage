@@ -6,9 +6,7 @@ Let's take it back to the 1990s. This library implements a multi-threaded server
 
 Browsers don't speak FastCGI protocol.
 Thankfully, most popular web servers do. 
-So to test locally, we'll have to have one such web server running.
 I'll be using Nginx & Caddy as examples.
-Pick one.
 
 1. Download either [Nginx](https://nginx.org/) or [Caddy](https://caddyserver.com/)
 2. Configure the web server to reverse proxy fastcgi:
@@ -37,15 +35,15 @@ Pick one.
    - Nginx: `sudo nginx -p $(pwd) -c nginx.conf`
 4. Run `cargo new --bin app && cd app && cargo add vintage`, and stick this in `main.rs`:
    ```rust
-   use vintage::{ServerSpec, Response};
+   use vintage::{ServerConfig, Response};
 
    fn main() {
-       let server = ServerSpec::new()
+       let config = ServerConfig::new()
            .on_get(["/about"], |_req, _params| {
                Response::html("<h1>Hello World</h1>")
-           })
-           .start("localhost:8080")
-           .unwrap();
+           });
+
+       let server = vintage::start(config, "localhost:8080").unwrap();
 
        server.join();
    }
